@@ -104,7 +104,7 @@ export const buildLevelManifest = (folder: string) =>
 
 
 export interface CacheManifestEntry {
-  kind: "moby" | "tie" | "detail" | "shrub" | "foliage" | "texture" | "ufrag" | "sky";
+  kind: "moby" | "tie" | "detail" | "shrub" | "foliage" | "texture" | "ufrag" | "sky" | "cubemap";
   tuid: string;
   name: string;
   file: string;
@@ -140,11 +140,18 @@ export interface CacheStatus {
 }
 
 export type CacheEvent =
-  | { type: "phase"; phase: "mobys" | "ties" | "materials" | "normalmaps" | "textures"; total: number }
-  | { type: "item"; kind: "moby" | "tie" | "texture"; name: string }
+  | { type: "phase"; phase: "mobys" | "ties" | "materials" | "normalmaps" | "textures" | "ufrags"; total: number }
+  | { type: "item"; kind: "moby" | "tie" | "ufrag" | "texture" | "cubemap"; name: string; file: string }
   | { type: "progress"; current: number }
   | { type: "done"; entry_count: number }
   | { type: "error"; message: string };
+
+export interface CubemapDescriptor {
+  tuid: string;
+  width: number;
+  height: number;
+  faces: string[];
+}
 
 export const cacheStatus = (folder: string) =>
   invoke<CacheStatus>("cache_status", { folder });
@@ -259,6 +266,19 @@ export const exportMobyGlbWithOptions = (
     options,
   });
 
+export const exportMobyFbxWithOptions = (
+  levelFolder: string,
+  assetTuidHex: string,
+  outPath: string,
+  options: GlbExportOptions,
+) =>
+  invoke<number>("export_moby_fbx_with_options", {
+    levelFolder,
+    assetTuidHex,
+    outPath,
+    options,
+  });
+
 export const writeBytes = (path: string, bytes: number[]) =>
   invoke<void>("write_bytes", { path, bytes });
 
@@ -326,22 +346,64 @@ export const exportLevelGlb = (
     onEvent,
   });
 
+export const exportLevelFbx = (
+  levelFolder: string,
+  outPath: string,
+  onEvent: Channel<LevelGlbExportEvent>,
+) =>
+  invoke<void>("export_level_fbx", {
+    levelFolder,
+    outPath,
+    onEvent,
+  });
+
 
 
 
 export async function loadCachedTextures(
   folder: string,
   ids: number[],
+  options?: {
+    concurrency?: number;
+    onBatch?: (out: TextureBlobMap) => void;
+  },
 ): Promise<TextureBlobMap> {
   const out: TextureBlobMap = new Map();
-  for (const id of ids) {
-    try {
-      const buf = await readCachedBytes(folder, `textures/${id}.png`);
-      out.set(id, new Blob([buf], { type: "image/png" }));
-    } catch {
-      /* ignore — missing texture */
+  const concurrency = Math.max(1, options?.concurrency ?? 32);
+  const onBatch = options?.onBatch;
+  let nextIdx = 0;
+  let dirty = false;
+  let flushScheduled = false;
+  const scheduleFlush = () => {
+    if (!onBatch || flushScheduled || !dirty) return;
+    flushScheduled = true;
+    dirty = false;
+    queueMicrotask(() => {
+      flushScheduled = false;
+      onBatch(out);
+      if (dirty) scheduleFlush();
+    });
+  };
+  const worker = async () => {
+    while (true) {
+      const i = nextIdx++;
+      if (i >= ids.length) return;
+      const id = ids[i]!;
+      try {
+        const buf = await readCachedBytes(folder, `textures/${id}.png`);
+        out.set(id, new Blob([buf], { type: "image/png" }));
+        dirty = true;
+        scheduleFlush();
+      } catch {
+        /* ignore — missing texture */
+      }
     }
+  };
+  const workers: Promise<void>[] = [];
+  for (let k = 0; k < Math.min(concurrency, ids.length); k++) {
+    workers.push(worker());
   }
+  await Promise.all(workers);
   return out;
 }
 
@@ -849,12 +911,20 @@ export type SoundCategory = "sfx" | "dialog" | "music";
 /// Classify a sound entry by its source filename. Works for all 4 supported
 /// games — Insomniac uses consistent naming:
 ///   - `*dialogue*` / `*voice*` → dialog
-///   - `*music*`                → music
+///   - `*music*` and various music-related tokens → music
 ///   - `*sound*` and everything else → sfx
+///
+/// Music heuristic notes:
+///   - `music` is the obvious one.
+///   - `mus` is the engine's abbreviation but only when it sits at a word
+///     boundary (e.g. `mus_intro`, `level_mus`, `mus.bnk`) so we don't
+///     match unrelated words that happen to contain those letters.
+///   - `bgm` / `theme` / `ost` are common game-music tags.
+const MUSIC_PATTERN = /(^|[^a-z])(music|mus|bgm|theme|ost)([^a-z]|$)/;
 export function classifySound(source: string): SoundCategory {
   const s = source.toLowerCase();
   if (s.includes("dialogue") || s.includes("voice")) return "dialog";
-  if (s.includes("music")) return "music";
+  if (MUSIC_PATTERN.test(s)) return "music";
   return "sfx";
 }
 

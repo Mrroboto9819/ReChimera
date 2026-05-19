@@ -27,6 +27,7 @@ import {
   type AssetMeshes,
   type CacheEvent,
   type CacheManifest,
+  type CubemapDescriptor,
   type CacheManifestEntry,
   type ExtractedSound,
   type Instance,
@@ -36,7 +37,9 @@ import {
   type TextureBlobMap,
 } from "../api";
 import { AssetPreview } from "../views/AssetPreview";
+import { ExportFormatPicker } from "./ExportFormatPicker";
 import { ExportOptionsModal } from "./ExportOptionsModal";
+import type { ExportFormat } from "../store";
 import type { ExportPicks } from "../views/GlbPreview";
 import { Modal } from "./Modal";
 import { SoundPlayer, type NowPlaying } from "./SoundPlayer";
@@ -54,6 +57,7 @@ interface CacheLibraryModalProps {
   onRequestExtract?: () => void;
   onUseAsSkybox?: (textureId: number) => void;
   currentSkyboxTextureId?: number | null;
+  cubemapDescriptor?: CubemapDescriptor | null;
 }
 
 export type LibraryFilter =
@@ -116,6 +120,7 @@ export function CacheLibraryModal({
   onRequestExtract,
   onUseAsSkybox,
   currentSkyboxTextureId,
+  cubemapDescriptor: _cubemapDescriptor,
 }: CacheLibraryModalProps) {
   const [manifest, setManifest] = useState<CacheManifest | null>(null);
   const [manifestError, setManifestError] = useState<string | null>(null);
@@ -914,6 +919,7 @@ export function CacheLibraryModal({
 
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("glb");
   const [previewPicks, setPreviewPicks] = useState<ExportPicks>({ byAnimset: {} });
 
   useEffect(() => {
@@ -948,9 +954,10 @@ export function CacheLibraryModal({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [open, exportModalOpen, moveSelection]);
-  const handleExport = () => {
+  const handleExport = (format: ExportFormat = "glb") => {
     if (!selectedAsset || exporting || !folder) return;
     setExportStatus(null);
+    setExportFormat(format);
     setExportModalOpen(true);
   };
 
@@ -964,7 +971,7 @@ export function CacheLibraryModal({
     setSelectedAsset(null);
     setManifest(null);
     const channel = new Channel<CacheEvent>();
-    let phase: "mobys" | "ties" | "materials" | "normalmaps" | "textures" = "mobys";
+    let phase: "mobys" | "ties" | "materials" | "normalmaps" | "textures" | "ufrags" = "mobys";
     channel.onmessage = (event) => {
       switch (event.type) {
         case "phase":
@@ -1065,7 +1072,7 @@ export function CacheLibraryModal({
               className={`cache-library-tab cache-library-tab--sky ${filter === "sky" ? "active" : ""}`}
               onClick={() => setFilter("sky")}
             >
-              Sky
+              Cubemap
             </button>
           </div>
           <button
@@ -1102,15 +1109,11 @@ export function CacheLibraryModal({
                 {bulkBusy ? "Exporting…" : `Export ${assetMulti.size} GLBs`}
               </Button>
             ) : (
-              <Button
-                variant="primary"
-                icon={Download}
-                onClick={handleExport}
+              <ExportFormatPicker
+                onExport={(format) => handleExport(format)}
                 disabled={!selectedAsset}
                 loading={exporting}
-              >
-                {exporting ? "Exporting…" : "Export .glb"}
-              </Button>
+              />
             ))}
           {filter === "texture" &&
             (textureMulti.size > 1 ? (
@@ -1160,7 +1163,7 @@ export function CacheLibraryModal({
                     }}
                     disabled={!selectedTextureId}
                   >
-                    Use as skybox
+                    Use as cubemap
                   </Button>
                 )}
               </>
@@ -1780,6 +1783,7 @@ export function CacheLibraryModal({
           hasSkeleton={selectedAsset.skeleton != null}
           primaryAnimsetHash={selectedAsset.animset_hash ?? null}
           initialExtraPicks={previewPicks.byAnimset}
+          format={exportFormat}
           onClose={() => setExportModalOpen(false)}
           onExported={(path, bytes) => {
             setExportStatus(`Exported ${bytes.toLocaleString()} bytes → ${path}`);
@@ -1917,11 +1921,12 @@ function SkyTexturePanel({
       }}
     >
       <div>
-        <h3 style={{ margin: "0 0 4px" }}>Skybox image</h3>
+        <h3 style={{ margin: "0 0 4px" }}>Cubemap</h3>
         <p className="dim small" style={{ margin: 0 }}>
-          Pick any cached texture as the skybox. It applies as the scene
-          background (equirectangular mapping) and you can save it as PNG or
-          DDS.
+          The level's auto-extracted cubemap (6 DXT1 faces from
+          cubemaps.dat) binds as the scene background. Optionally pick a
+          single cached texture as an equirect override here — applies on
+          top and you can save it as PNG or DDS.
         </p>
       </div>
       <div
@@ -1938,11 +1943,11 @@ function SkyTexturePanel({
         }}
       >
         {currentSkyboxTextureId == null ? (
-          <span className="dim">No skybox texture set</span>
+          <span className="dim">No cubemap override set</span>
         ) : url ? (
           <img
             src={url}
-            alt={`skybox ${currentSkyboxTextureId}`}
+            alt={`cubemap ${currentSkyboxTextureId}`}
             draggable={false}
             onDragStart={(e) => e.preventDefault()}
             style={{
@@ -1969,7 +1974,7 @@ function SkyTexturePanel({
         </Button>
         {currentSkyboxTextureId != null && (
           <>
-            <Button onClick={onClearSkybox}>Clear skybox</Button>
+            <Button onClick={onClearSkybox}>Clear cubemap</Button>
             <Button icon={Download} onClick={() => void onExportPng()}>
               Save PNG
             </Button>

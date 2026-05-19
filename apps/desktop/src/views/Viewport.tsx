@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
-  Bone,
   Box,
   Compass,
   Download,
   Grid3x3,
   type LucideIcon,
   Mountain,
-  Play,
-  Square,
   Users,
 } from "lucide-react";
 import { Channel } from "@tauri-apps/api/core";
@@ -18,11 +15,11 @@ import { useTranslation } from "react-i18next";
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import {
   GizmoHelper,
+  GizmoViewport,
   Grid,
   Html,
   OrbitControls,
   TransformControls,
-  useGizmoContext,
 } from "@react-three/drei";
 import gsap from "gsap";
 import * as THREE from "three";
@@ -30,6 +27,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type {
   AssetKind,
   AssetMeshes,
+  CubemapDescriptor,
   DecodedClip,
   Instance as InstanceData,
   LevelMeshes,
@@ -40,13 +38,16 @@ import type {
 } from "../api";
 import {
   decodeMeshGeom,
+  exportLevelFbx,
   exportLevelGlb,
   fetchAnimsetClip,
   readCachedBytes,
   type LevelGlbExportEvent,
 } from "../api";
 import { buildAnimationClipFromDecoded, buildSkinnedAsset } from "../skinning";
+import { ExportFormatPicker } from "../components/ExportFormatPicker";
 import { FpsOverlay, FpsSampler } from "../components/FpsOverlay";
+import type { ExportFormat } from "../store";
 import type { LoadPhaseState } from "../components/LoadProgress";
 import { clickMods, type useSelection } from "../selection";
 import { resolvedTransform, type InstanceEdit, type useEdits } from "../edits";
@@ -403,6 +404,212 @@ function LightGizmoGroup({
       <icosahedronGeometry args={[1, 1]} />
       <meshBasicMaterial wireframe transparent opacity={0.85} />
     </instancedMesh>
+  );
+}
+
+// Cubemap binding is temporarily disabled — the 0x5940 cubemap blob
+// decodes with the wrong byte order / block-layout when fed straight to
+// texpresso (PS3 stores DXT1 u16 colours big-endian, likely Morton-tiled
+// block order on top of that). The 6 face PNGs are still emitted into
+// the cache for offline inspection; the binding gets wired back once the
+// decode is fixed so the scene background isn't a wall of debug tiles.
+const CUBEMAP_BIND_ENABLED = false;
+
+function CubemapBackground({
+  descriptor,
+  levelFolder,
+}: {
+  descriptor: CubemapDescriptor | null;
+  levelFolder: string | null;
+}) {
+  const { scene } = useThree();
+  const [tex, setTex] = useState<THREE.CubeTexture | null>(null);
+
+  useEffect(() => {
+    if (
+      !CUBEMAP_BIND_ENABLED ||
+      !descriptor ||
+      !levelFolder ||
+      descriptor.faces.length !== 6
+    ) {
+      setTex(null);
+      return;
+    }
+    let cancelled = false;
+    const urls: string[] = [];
+    let cubeTex: THREE.CubeTexture | null = null;
+    void (async () => {
+      try {
+        const blobs = await Promise.all(
+          descriptor.faces.map(async (rel) => {
+            const bytes = await readCachedBytes(levelFolder, rel);
+            return new Blob([bytes as ArrayBuffer], { type: "image/png" });
+          }),
+        );
+        if (cancelled) return;
+        const faceUrls = blobs.map((b) => URL.createObjectURL(b));
+        urls.push(...faceUrls);
+        const loader = new THREE.CubeTextureLoader();
+        loader.load(
+          faceUrls,
+          (t) => {
+            if (cancelled) {
+              t.dispose();
+              return;
+            }
+            t.colorSpace = THREE.SRGBColorSpace;
+            cubeTex = t;
+            setTex(t);
+          },
+          undefined,
+          () => {
+            if (!cancelled) setTex(null);
+          },
+        );
+      } catch {
+        if (!cancelled) setTex(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      for (const u of urls) URL.revokeObjectURL(u);
+      if (cubeTex) cubeTex.dispose();
+    };
+  }, [descriptor, levelFolder]);
+
+  useEffect(() => {
+    if (!tex) return;
+    const prev = scene.background;
+    scene.background = tex;
+    return () => {
+      if (scene.background === tex) scene.background = prev;
+    };
+  }, [scene, tex]);
+
+  return null;
+}
+
+function ZoomSlider({
+  orbitRef,
+  extent,
+}: {
+  orbitRef: React.RefObject<OrbitControlsImpl>;
+  extent: number;
+}) {
+  // norm: 0 = farthest, 1 = closest. The handle position uses
+  // (1 - norm) along the track so "up" means zoom in (closer).
+  const [norm, setNorm] = useState(0.5);
+  const [isActive, setIsActive] = useState(false);
+  const dragging = useRef(false);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const minDist = Math.max(1, extent * 0.05);
+  const maxDist = extent * 3;
+
+  const readNormFromOrbit = useCallback(() => {
+    const orbit = orbitRef.current;
+    if (!orbit) return null;
+    const cam = orbit.object as THREE.PerspectiveCamera;
+    const dist = cam.position.distanceTo(orbit.target);
+    const t = (dist - minDist) / (maxDist - minDist);
+    return 1 - Math.max(0, Math.min(1, t));
+  }, [orbitRef, minDist, maxDist]);
+
+  // Poll OrbitControls so scroll-wheel zoom updates the slider even
+  // before the controls instance is wired up (the ref is null on the
+  // first render).
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      if (!dragging.current) {
+        const n = readNormFromOrbit();
+        if (n != null) {
+          setNorm((prev) => (Math.abs(prev - n) > 0.001 ? n : prev));
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [readNormFromOrbit]);
+
+  const setDistanceFromNorm = useCallback(
+    (n: number) => {
+      const orbit = orbitRef.current;
+      if (!orbit) return;
+      const cam = orbit.object as THREE.PerspectiveCamera;
+      const newDist = minDist + (1 - n) * (maxDist - minDist);
+      const dir = new THREE.Vector3()
+        .subVectors(cam.position, orbit.target)
+        .normalize();
+      if (!isFinite(dir.x) || dir.lengthSq() < 1e-6) {
+        dir.set(0, 0, 1);
+      }
+      cam.position.copy(orbit.target).addScaledVector(dir, newDist);
+      orbit.update();
+    },
+    [orbitRef, minDist, maxDist],
+  );
+
+  const applyPointer = useCallback(
+    (clientY: number) => {
+      const el = trackRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const y = clientY - rect.top;
+      const t = Math.max(0, Math.min(1, y / rect.height));
+      const n = 1 - t;
+      setNorm(n);
+      setDistanceFromNorm(n);
+    },
+    [setDistanceFromNorm],
+  );
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    dragging.current = true;
+    setIsActive(true);
+    applyPointer(e.clientY);
+  };
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    applyPointer(e.clientY);
+  };
+  const endDrag = () => {
+    dragging.current = false;
+    setIsActive(false);
+  };
+
+  const handleTopPct = (1 - norm) * 100;
+  const fillBottomPct = norm * 100;
+
+  return (
+    <div
+      className={`viewport-zoom-slider${isActive ? " is-active" : ""}`}
+      title="Zoom"
+    >
+      <div
+        ref={trackRef}
+        className="viewport-zoom-track"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
+        <div
+          className="viewport-zoom-fill"
+          style={{ height: `${fillBottomPct}%` }}
+        />
+        <div
+          className="viewport-zoom-handle"
+          style={{ top: `${handleTopPct}%` }}
+          aria-label="Zoom"
+          role="slider"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(norm * 100)}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -838,14 +1045,11 @@ function AssetGroup({
   const [, bumpBuildVersion] = useState(0);
   useEffect(() => {
     let cancelled = false;
+    const BUDGET_MS = 8;
 
-    const buildOne = () => {
-      if (cancelled) return;
-      
-      
-      
+    const pickNext = (firstInTick: boolean) => {
       let next: (typeof meshes)[number] | null = null;
-      if (prioritizedAssetTuid) {
+      if (prioritizedAssetTuid && firstInTick) {
         const p = meshes.find(
           (a) =>
             a.asset_tuid === prioritizedAssetTuid &&
@@ -853,7 +1057,6 @@ function AssetGroup({
         );
         if (p) next = p;
       }
-      
       if (!next) {
         for (const a of meshes) {
           if (cache.byAsset.has(a.asset_tuid)) continue;
@@ -862,32 +1065,51 @@ function AssetGroup({
           break;
         }
       }
-      if (!next) return; 
+      return next;
+    };
 
-      const submeshes = next.submeshes.map((s) => ({
-        geom: buildMeshGeometry(s),
-        material: getMaterial(s.albedo_id, s.normal_id, s.emissive_id),
-      }));
-      cache.byAsset.set(next.asset_tuid, submeshes);
-
-      
-      
-      bumpBuildVersion((v) => v + 1);
-      schedule();
+    const buildBatch = (deadline?: IdleDeadline) => {
+      if (cancelled) return;
+      const start = performance.now();
+      let built = 0;
+      while (true) {
+        const remaining = deadline
+          ? deadline.timeRemaining()
+          : BUDGET_MS - (performance.now() - start);
+        if (remaining <= 0) break;
+        const next = pickNext(built === 0);
+        if (!next) break;
+        const submeshes = next.submeshes.map((s) => ({
+          geom: buildMeshGeometry(s),
+          material: getMaterial(s.albedo_id, s.normal_id, s.emissive_id),
+        }));
+        cache.byAsset.set(next.asset_tuid, submeshes);
+        built++;
+      }
+      if (built > 0) {
+        bumpBuildVersion((v) => v + 1);
+      }
+      let hasMore = false;
+      for (const a of meshes) {
+        if (!cache.byAsset.has(a.asset_tuid) && grouped.has(a.asset_tuid)) {
+          hasMore = true;
+          break;
+        }
+      }
+      if (hasMore) schedule();
     };
 
     const schedule = () => {
       if (cancelled) return;
-      
-      
-      const ric =
-        (window as Window & {
-          requestIdleCallback?: (cb: () => void) => number;
-        }).requestIdleCallback;
+      const ric = (
+        window as Window & {
+          requestIdleCallback?: (cb: (d: IdleDeadline) => void) => number;
+        }
+      ).requestIdleCallback;
       if (typeof ric === "function") {
-        ric(buildOne);
+        ric((d) => buildBatch(d));
       } else {
-        setTimeout(buildOne, 0);
+        setTimeout(() => buildBatch(undefined), 0);
       }
     };
 
@@ -895,10 +1117,6 @@ function AssetGroup({
     return () => {
       cancelled = true;
     };
-    
-    
-    
-    
   }, [meshes, grouped, cache, prioritizedAssetTuid]);
 
   
@@ -967,65 +1185,32 @@ function AssetGroup({
 
 
 
-function UFragMeshNode({
-  ufrag,
-  texture,
-  fallbackColor,
-  selected,
-  onClick,
-}: {
-  ufrag: UFragMesh;
-  texture: THREE.Texture | null;
-  fallbackColor: THREE.Color;
-  selected: boolean;
-  onClick: (ufrag: UFragMesh, e: ThreeEvent<MouseEvent>) => void;
-}) {
-  const geom = useMemo(
-    () =>
-      buildMeshGeometry(ufrag.mesh),
-    [ufrag],
-  );
-  useEffect(() => () => geom.dispose(), [geom]);
-
-  return (
-    <mesh
-      position={ufrag.position}
-      geometry={geom}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick(ufrag, e);
-      }}
-    >
-      {texture ? (
-        <meshStandardMaterial
-          map={texture}
-          color={selected ? 0xff8855 : 0xffffff}
-          roughness={0.9}
-          metalness={0}
-        />
-      ) : (
-        <meshStandardMaterial
-          color={selected ? 0xff8855 : fallbackColor}
-          roughness={0.9}
-          metalness={0}
-        />
-      )}
-    </mesh>
-  );
-}
-
 function zoneColorOf(zoneTuid: string): THREE.Color {
   const lo = parseInt(zoneTuid.slice(-8), 16) || 0;
   const hue = lo % 360;
   return new THREE.Color().setHSL(hue / 360, 0.45, 0.45);
 }
 
+// Special key for ufrags with no albedo texture. Negative so it can't
+// collide with any valid texture id.
+const UFRAG_UNTEXTURED_KEY = -1;
+
+// Merges every UFragMesh that shares an albedo texture into one
+// BufferGeometry. A typical level ships 1.6k individual ufrag chunks
+// across ~10-50 unique textures, so this collapses ~1600 draw calls
+// down to ~50 — enough headroom that WebGL no longer trips its context
+// budget when the rest of the scene (mobys, ties, instances) is also
+// live.
+//
+// The trade-off is that we lose per-ufrag picking on terrain. Mobys
+// and ties still highlight on click; clicking terrain just hits the
+// merged group (no `onPickUFrag` callback is wired). If granular ufrag
+// selection is needed back, the merge produces BufferGeometry groups
+// keyed by ufrag index that picking could resolve via faceIndex.
 function UFragMeshGroup({
   meshes,
   textures,
   visible,
-  selectedTuid,
-  onPickUFrag,
 }: {
   meshes: UFragMesh[];
   textures: Map<number, THREE.Texture>;
@@ -1033,28 +1218,118 @@ function UFragMeshGroup({
   selectedTuid: string | null;
   onPickUFrag: (ufrag: UFragMesh, e: ThreeEvent<MouseEvent>) => void;
 }) {
-  const colorByZone = useMemo(() => {
-    const m = new Map<string, THREE.Color>();
+  // Build one merged geometry per texture key.
+  const groups = useMemo(() => {
+    type Group = {
+      key: number;
+      geom: THREE.BufferGeometry;
+      zoneTuid: string;
+    };
+
+    const byTexture = new Map<number, UFragMesh[]>();
     for (const u of meshes) {
-      if (!m.has(u.zone_tuid)) m.set(u.zone_tuid, zoneColorOf(u.zone_tuid));
+      const key = u.mesh.albedo_id ?? UFRAG_UNTEXTURED_KEY;
+      let arr = byTexture.get(key);
+      if (!arr) {
+        arr = [];
+        byTexture.set(key, arr);
+      }
+      arr.push(u);
     }
-    return m;
+
+    const out: Group[] = [];
+    for (const [key, ufrags] of byTexture) {
+      const decoded = ufrags.map((u) => decodeMeshGeom(u.mesh));
+      let totalVerts = 0;
+      let totalIndices = 0;
+      for (const d of decoded) {
+        totalVerts += d.positions.length / 3;
+        totalIndices += d.indices.length;
+      }
+      const positions = new Float32Array(totalVerts * 3);
+      const uvs = new Float32Array(totalVerts * 2);
+      const indices = new Uint32Array(totalIndices);
+
+      let vOff = 0;
+      let iOff = 0;
+      for (let i = 0; i < decoded.length; i++) {
+        const d = decoded[i]!;
+        const u = ufrags[i]!;
+        const baseVert = vOff;
+        const vCount = d.positions.length / 3;
+        const [ox, oy, oz] = u.position;
+        for (let v = 0; v < vCount; v++) {
+          positions[(vOff + v) * 3 + 0] = d.positions[v * 3 + 0]! + ox;
+          positions[(vOff + v) * 3 + 1] = d.positions[v * 3 + 1]! + oy;
+          positions[(vOff + v) * 3 + 2] = d.positions[v * 3 + 2]! + oz;
+        }
+        if (d.uvs.length > 0) uvs.set(d.uvs, vOff * 2);
+        for (let j = 0; j < d.indices.length; j++) {
+          indices[iOff + j] = d.indices[j]! + baseVert;
+        }
+        vOff += vCount;
+        iOff += d.indices.length;
+      }
+
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      if (uvs.length > 0)
+        geom.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+      geom.setIndex(new THREE.BufferAttribute(indices, 1));
+      geom.computeBoundingSphere();
+      out.push({
+        key,
+        geom,
+        zoneTuid: ufrags[0]!.zone_tuid,
+      });
+    }
+    return out;
   }, [meshes]);
+
+  // Dispose merged geometries when ufrag set changes (level reload).
+  useEffect(() => {
+    return () => {
+      for (const g of groups) g.geom.dispose();
+    };
+  }, [groups]);
+
+  // Cache shared materials by texture key so we don't allocate a new
+  // material per render. Materials are kept across renders and disposed
+  // on group change.
+  const materialsRef = useRef<Map<number, THREE.MeshStandardMaterial>>(
+    new Map(),
+  );
+  useEffect(() => {
+    const cache = materialsRef.current;
+    return () => {
+      for (const m of cache.values()) m.dispose();
+      cache.clear();
+    };
+  }, [groups]);
 
   if (!visible) return null;
 
   return (
     <group>
-      {meshes.map((u, idx) => (
-        <UFragMeshNode
-          key={`${u.tuid}-${idx}`}
-          ufrag={u}
-          texture={u.mesh.albedo_id != null ? textures.get(u.mesh.albedo_id) ?? null : null}
-          fallbackColor={colorByZone.get(u.zone_tuid)!}
-          selected={selectedTuid === u.tuid}
-          onClick={onPickUFrag}
-        />
-      ))}
+      {groups.map(({ key, geom, zoneTuid }) => {
+        const cache = materialsRef.current;
+        let mat = cache.get(key);
+        const tex =
+          key !== UFRAG_UNTEXTURED_KEY ? textures.get(key) ?? null : null;
+        if (!mat) {
+          mat = new THREE.MeshStandardMaterial({
+            map: tex,
+            color: tex ? 0xffffff : zoneColorOf(zoneTuid),
+            roughness: 0.9,
+            metalness: 0,
+          });
+          cache.set(key, mat);
+        } else if (tex && mat.map !== tex) {
+          mat.map = tex;
+          mat.needsUpdate = true;
+        }
+        return <mesh key={key} geometry={geom} material={mat} />;
+      })}
     </group>
   );
 }
@@ -1377,168 +1652,8 @@ function CameraSnap({
 const AXIS_X_COLOR = "#ff5577";
 const AXIS_Y_COLOR = "#7dd957";
 const AXIS_Z_COLOR = "#3aa3ff";
-const AXIS_LABEL_FG = "#0b0c0e";
 
-type AxisKey = "x" | "y" | "z";
 
-function AxisHead({
-  position,
-  arcStyle,
-  label,
-  faded,
-  onActivate,
-}: {
-  position: [number, number, number];
-  arcStyle: string;
-  label: string;
-  faded?: boolean;
-  onActivate: () => void;
-}) {
-  const gl = useThree((s) => s.gl);
-  const [hover, setHover] = useState(false);
-
-  const texture = useMemo(() => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext("2d")!;
-    ctx.beginPath();
-    ctx.arc(32, 32, 16, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.fillStyle = arcStyle;
-    ctx.fill();
-    if (faded) {
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = arcStyle;
-      ctx.stroke();
-    }
-    ctx.font = "bold 18px Inter, Arial, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = AXIS_LABEL_FG;
-    ctx.fillText(label, 32, 33);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.needsUpdate = true;
-    return tex;
-  }, [arcStyle, label, faded]);
-
-  const baseScale = faded ? 0.85 : 1.0;
-  const scale = baseScale * (hover ? 1.2 : 1);
-
-  return (
-    <sprite
-      position={position}
-      scale={scale}
-      onPointerOver={(e) => {
-        e.stopPropagation();
-        setHover(true);
-      }}
-      onPointerOut={(e) => {
-        e.stopPropagation();
-        setHover(false);
-      }}
-      onPointerDown={(e) => {
-        e.stopPropagation();
-        onActivate();
-      }}
-    >
-      <spriteMaterial
-        map={texture}
-        map-anisotropy={gl.capabilities.getMaxAnisotropy() || 1}
-        alphaTest={0.3}
-        opacity={faded ? 0.55 : 1}
-        toneMapped={false}
-      />
-    </sprite>
-  );
-}
-
-function AxisLine({
-  rotation,
-  color,
-}: {
-  rotation: [number, number, number];
-  color: string;
-}) {
-  return (
-    <group rotation={rotation}>
-      <mesh position={[0.4, 0, 0]}>
-        <boxGeometry args={[0.8, 0.05, 0.05]} />
-        <meshBasicMaterial color={color} toneMapped={false} />
-      </mesh>
-    </group>
-  );
-}
-
-function GizmoViewportSixAxis() {
-  const { tweenCamera } = useGizmoContext();
-  const lastSignedAxisRef = useRef<string | null>(null);
-
-  const handleClick = useCallback(
-    (axis: AxisKey, sign: 1 | -1) => {
-      const key = `${sign > 0 ? "+" : "-"}${axis}`;
-      const flip = lastSignedAxisRef.current === key;
-      const finalSign = flip ? -sign : sign;
-      const dir = new THREE.Vector3(
-        axis === "x" ? finalSign : 0,
-        axis === "y" ? finalSign : 0,
-        axis === "z" ? finalSign : 0,
-      );
-      tweenCamera(dir);
-      lastSignedAxisRef.current = `${finalSign > 0 ? "+" : "-"}${axis}`;
-    },
-    [tweenCamera],
-  );
-
-  return (
-    <group scale={40}>
-      <AxisLine rotation={[0, 0, 0]} color={AXIS_X_COLOR} />
-      <AxisLine rotation={[0, 0, Math.PI / 2]} color={AXIS_Y_COLOR} />
-      <AxisLine rotation={[0, -Math.PI / 2, 0]} color={AXIS_Z_COLOR} />
-
-      <AxisHead
-        position={[1, 0, 0]}
-        arcStyle={AXIS_X_COLOR}
-        label="X"
-        onActivate={() => handleClick("x", 1)}
-      />
-      <AxisHead
-        position={[0, 1, 0]}
-        arcStyle={AXIS_Y_COLOR}
-        label="Y"
-        onActivate={() => handleClick("y", 1)}
-      />
-      <AxisHead
-        position={[0, 0, 1]}
-        arcStyle={AXIS_Z_COLOR}
-        label="Z"
-        onActivate={() => handleClick("z", 1)}
-      />
-
-      <AxisHead
-        position={[-1, 0, 0]}
-        arcStyle={AXIS_X_COLOR}
-        label="-X"
-        faded
-        onActivate={() => handleClick("x", -1)}
-      />
-      <AxisHead
-        position={[0, -1, 0]}
-        arcStyle={AXIS_Y_COLOR}
-        label="-Y"
-        faded
-        onActivate={() => handleClick("y", -1)}
-      />
-      <AxisHead
-        position={[0, 0, -1]}
-        arcStyle={AXIS_Z_COLOR}
-        label="-Z"
-        faded
-        onActivate={() => handleClick("z", -1)}
-      />
-    </group>
-  );
-}
 
 
 
@@ -1989,6 +2104,7 @@ interface ViewportProps {
 
   hasCachedSky?: boolean;
   cacheVersion?: number;
+  cubemapDescriptor?: CubemapDescriptor | null;
 }
 
 function computeBounds(positions: Iterable<[number, number, number]>) {
@@ -2033,6 +2149,7 @@ export function Viewport({
   meshLoadPhase,
   levelFolder,
   overrideAnimsetHash,
+  cubemapDescriptor,
 }: ViewportProps) {
   const [mapExportPhase, setMapExportPhase] = useState<{
     label: string;
@@ -2041,6 +2158,124 @@ export function Viewport({
   } | null>(null);
   const [mapExportError, setMapExportError] = useState<string | null>(null);
   const [mapExportStatus, setMapExportStatus] = useState<string | null>(null);
+  const orbitRef = useRef<OrbitControlsImpl>(null);
+
+  // Count placements per kind so we can disable empty toggles + show
+  // counts in the header. `ufrag` lives on `meshes.ufrag_meshes` and on
+  // `meshes.ufrags` (UFragBounds), not on `instances`.
+  const kindCounts = useMemo(() => {
+    const c = {
+      moby: 0,
+      tie: 0,
+      detail: 0,
+      shrub: 0,
+      foliage: 0,
+      envsampler: 0,
+      ufrag: meshes?.ufrag_meshes?.length ?? 0,
+    };
+    for (const inst of instances) {
+      if (inst.kind in c) {
+        (c as Record<string, number>)[inst.kind] =
+          ((c as Record<string, number>)[inst.kind] ?? 0) + 1;
+      }
+    }
+    return c;
+  }, [instances, meshes?.ufrag_meshes?.length]);
+
+  // Stage which AssetGroups mount so heavy work (especially the 1k+
+  // ufrag mesh allocations) doesn't compete with the lighter moby/tie
+  // groups for GPU / main-thread time on level open. Phase advances
+  // 0 → mobys, 1 → +ties, 2 → +details/shrubs/foliage, 3 → +ufrags.
+  // We reset to 0 whenever the level (and therefore `meshes`) changes.
+  const [renderPhase, setRenderPhase] = useState(0);
+  useEffect(() => {
+    if (!meshes) {
+      setRenderPhase(0);
+      return;
+    }
+    setRenderPhase(0);
+    const t1 = window.setTimeout(() => setRenderPhase(1), 600);
+    const t2 = window.setTimeout(() => setRenderPhase(2), 1400);
+    const t3 = window.setTimeout(() => setRenderPhase(3), 2400);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+    };
+  }, [meshes]);
+
+  useEffect(() => {
+    if (!meshes) return;
+    const byKind = new Map<string, number>();
+    const tuidsByKind = new Map<string, Set<string>>();
+    for (const i of instances) {
+      byKind.set(i.kind, (byKind.get(i.kind) ?? 0) + 1);
+      let s = tuidsByKind.get(i.kind);
+      if (!s) {
+        s = new Set();
+        tuidsByKind.set(i.kind, s);
+      }
+      s.add(i.asset_tuid);
+    }
+    const moby_assets_tuids = new Set(meshes.moby_assets.map((a) => a.asset_tuid));
+    const tie_assets_tuids = new Set(meshes.tie_assets.map((a) => a.asset_tuid));
+    const detail_assets_tuids = new Set(
+      (meshes.detail_assets ?? []).map((a) => a.asset_tuid),
+    );
+    const shrub_assets_tuids = new Set(
+      (meshes.shrub_assets ?? []).map((a) => a.asset_tuid),
+    );
+    const foliage_assets_tuids = new Set(
+      (meshes.foliage_assets ?? []).map((a) => a.asset_tuid),
+    );
+
+    const intersect = (a: Set<string>, b: Set<string>) => {
+      let n = 0;
+      for (const x of a) if (b.has(x)) n++;
+      return n;
+    };
+
+    const mobyTuids = tuidsByKind.get("moby") ?? new Set();
+    const tieTuids = tuidsByKind.get("tie") ?? new Set();
+    const detailTuids = tuidsByKind.get("detail") ?? new Set();
+    const shrubTuids = tuidsByKind.get("shrub") ?? new Set();
+    const foliageTuids = tuidsByKind.get("foliage") ?? new Set();
+
+    console.log("[viewport-diag] level loaded — placement vs asset audit:", {
+      placements: {
+        moby: byKind.get("moby") ?? 0,
+        tie: byKind.get("tie") ?? 0,
+        detail: byKind.get("detail") ?? 0,
+        shrub: byKind.get("shrub") ?? 0,
+        foliage: byKind.get("foliage") ?? 0,
+        light: byKind.get("light") ?? 0,
+        envsampler: byKind.get("envsampler") ?? 0,
+      },
+      unique_asset_tuids_in_placements: {
+        moby: mobyTuids.size,
+        tie: tieTuids.size,
+        detail: detailTuids.size,
+        shrub: shrubTuids.size,
+        foliage: foliageTuids.size,
+      },
+      asset_classes_loaded: {
+        moby: moby_assets_tuids.size,
+        tie: tie_assets_tuids.size,
+        detail: detail_assets_tuids.size,
+        shrub: shrub_assets_tuids.size,
+        foliage: foliage_assets_tuids.size,
+      },
+      matched_placements_to_meshes: {
+        moby: intersect(mobyTuids, moby_assets_tuids),
+        tie: intersect(tieTuids, tie_assets_tuids),
+        detail: intersect(detailTuids, detail_assets_tuids),
+        shrub: intersect(shrubTuids, shrub_assets_tuids),
+        foliage: intersect(foliageTuids, foliage_assets_tuids),
+      },
+      ufrag_meshes: meshes.ufrag_meshes?.length ?? 0,
+      total_instances: instances.length,
+    });
+  }, [meshes, instances]);
 
   const headerRef = useRef<HTMLDivElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
@@ -2109,14 +2344,16 @@ export function Viewport({
     return () => document.removeEventListener("mousedown", close);
   }, [viewMenuOpen]);
 
-  const handleExportMap = useCallback(async () => {
+  const handleExportMap = useCallback(async (format: ExportFormat = "glb") => {
     if (!levelFolder || mapExportPhase) return;
+    const ext = format === "fbx" ? "fbx" : "glb";
+    const filterName = format === "fbx" ? "Autodesk FBX (ASCII)" : "glTF binary";
     let outPath: string | null = null;
     try {
       outPath = (await saveDialog({
-        title: "Export full map to GLB",
-        defaultPath: "level.glb",
-        filters: [{ name: "glTF binary", extensions: ["glb"] }],
+        title: `Export full map to ${ext.toUpperCase()}`,
+        defaultPath: `level.${ext}`,
+        filters: [{ name: filterName, extensions: [ext] }],
       })) as string | null;
     } catch (err) {
       setMapExportError(String(err));
@@ -2159,7 +2396,11 @@ export function Viewport({
     };
 
     try {
-      await exportLevelGlb(levelFolder, outPath, channel);
+      if (format === "fbx") {
+        await exportLevelFbx(levelFolder, outPath, channel);
+      } else {
+        await exportLevelGlb(levelFolder, outPath, channel);
+      }
     } catch (err) {
       setMapExportPhase(null);
       setMapExportError(String(err));
@@ -2236,37 +2477,60 @@ export function Viewport({
     title?: string;
     disabled?: boolean;
   };
+  // Auto-disable a toggle when there are 0 elements of that kind in the
+  // current level — the button stays visible but is grayed out so the
+  // user can tell at a glance what content is present. The count is
+  // appended to the label.
+  const withCount = (label: string, count: number) =>
+    count > 0 ? `${label} (${count})` : label;
   const renderLayerToggles: HeaderToggle[] = [
-    { key: "showMobys", label: "Mobys", Icon: Users, disabled: !hasLevel },
-    { key: "showTies", label: "Ties", Icon: Box, disabled: !hasLevel },
-    { key: "showDetails", label: "Details", Icon: Box, disabled: !hasLevel },
-    { key: "showShrubs", label: "Shrubs", Icon: Box, disabled: !hasLevel },
-    { key: "showFoliage", label: "Foliage", Icon: Box, disabled: !hasLevel },
-    { key: "showLights", label: "Lights", Icon: Box, disabled: !hasLevel },
+    {
+      key: "showMobys",
+      label: withCount("Mobys", kindCounts.moby),
+      Icon: Users,
+      disabled: !hasLevel || kindCounts.moby === 0,
+    },
+    {
+      key: "showTies",
+      label: withCount("Ties", kindCounts.tie),
+      Icon: Box,
+      disabled: !hasLevel || kindCounts.tie === 0,
+    },
+    {
+      key: "showDetails",
+      label: withCount("Details", kindCounts.detail),
+      Icon: Box,
+      disabled: !hasLevel || kindCounts.detail === 0,
+    },
+    {
+      key: "showShrubs",
+      label: withCount("Shrubs", kindCounts.shrub),
+      Icon: Box,
+      disabled: !hasLevel || kindCounts.shrub === 0,
+    },
+    {
+      key: "showFoliage",
+      label: withCount("Foliage", kindCounts.foliage),
+      Icon: Box,
+      disabled: !hasLevel || kindCounts.foliage === 0,
+    },
     {
       key: "showEnvSamplers",
-      label: "Env probes",
+      label: withCount("Env probes", kindCounts.envsampler),
       Icon: Box,
-      disabled: !hasLevel,
+      disabled: !hasLevel || kindCounts.envsampler === 0,
     },
     {
       key: "showUFrags",
-      label: tr("toolbar.terrain"),
+      label: withCount(tr("toolbar.terrain"), kindCounts.ufrag),
       Icon: Mountain,
-      disabled: !hasLevel,
+      disabled: !hasLevel || kindCounts.ufrag === 0,
     },
   ];
   const overlayToggles: HeaderToggle[] = [
     { key: "showGrid", label: tr("toolbar.grid"), Icon: Grid3x3 },
     { key: "showAxes", label: tr("toolbar.axes"), Icon: Compass },
     { key: "showStats", label: tr("toolbar.stats"), Icon: Activity },
-    {
-      key: "showUFragBounds",
-      label: tr("toolbar.ufragBounds"),
-      Icon: Square,
-    },
-    { key: "showBones", label: tr("toolbar.bones"), Icon: Bone },
-    { key: "playAnimation", label: tr("toolbar.play"), Icon: Play },
   ];
 
   useLayoutEffect(() => {
@@ -2428,26 +2692,17 @@ export function Viewport({
           );
         })()}
         <div className="viewport-header-spacer" />
-        <button
-          type="button"
-          className="viewport-header-export-btn"
-          onClick={handleExportMap}
-          disabled={!levelFolder || mapExportPhase !== null}
-          title={
-            !levelFolder
-              ? "Open a level first"
-              : mapExportPhase
-                ? "Exporting…"
-                : "Export the full map (placed mobys + ties) to a single GLB"
-          }
-        >
-          <Download size={14} aria-hidden />
-          <span className="viewport-header-export-label">
-            {mapExportPhase
-              ? `${mapExportPhase.label} ${mapExportPhase.current}/${mapExportPhase.total}`
-              : "Export map"}
-          </span>
-          {mapExportPhase && (
+        {mapExportPhase ? (
+          <button
+            type="button"
+            className="viewport-header-export-btn"
+            disabled
+            title="Exporting…"
+          >
+            <Download size={14} aria-hidden />
+            <span className="viewport-header-export-label">
+              {`${mapExportPhase.label} ${mapExportPhase.current}/${mapExportPhase.total}`}
+            </span>
             <span
               className="viewport-header-export-progress"
               style={{
@@ -2455,8 +2710,15 @@ export function Viewport({
               }}
               aria-hidden
             />
-          )}
-        </button>
+          </button>
+        ) : (
+          <ExportFormatPicker
+            onExport={(fmt) => void handleExportMap(fmt)}
+            disabled={!levelFolder}
+            label={(fmt) => (fmt === "fbx" ? "Export map .fbx" : "Export map .glb")}
+            placement="below"
+          />
+        )}
       </div>
       <div className="viewport-canvas-wrap">
       {contextLost && (
@@ -2545,6 +2807,10 @@ export function Viewport({
           textureId={view.skyboxTextureId}
           levelFolder={levelFolder}
         />
+        <CubemapBackground
+          descriptor={cubemapDescriptor ?? null}
+          levelFolder={levelFolder}
+        />
         <ambientLight intensity={0.6} />
         <directionalLight position={[100, 200, 50]} intensity={1.0} />
         <directionalLight position={[-100, 100, -50]} intensity={0.5} />
@@ -2611,50 +2877,14 @@ export function Viewport({
 
         {meshes && (
           <>
-            <AssetGroup
-              kind="tie"
-              meshes={meshes.tie_assets}
-              textures={textureMap}
-              instances={instances}
-              selectedIds={selection.ids}
-              onPick={onPick}
-              visible={view.showTies}
-              edits={edits.edits}
-              prioritizedAssetTuid={prioritizedAssetTuid}
-            />
-            <AssetGroup
-              kind="detail"
-              meshes={meshes.detail_assets ?? []}
-              textures={textureMap}
-              instances={instances}
-              selectedIds={selection.ids}
-              onPick={onPick}
-              visible={view.showDetails}
-              edits={edits.edits}
-              prioritizedAssetTuid={prioritizedAssetTuid}
-            />
-            <AssetGroup
-              kind="shrub"
-              meshes={meshes.shrub_assets ?? []}
-              textures={textureMap}
-              instances={instances}
-              selectedIds={selection.ids}
-              onPick={onPick}
-              visible={view.showShrubs}
-              edits={edits.edits}
-              prioritizedAssetTuid={prioritizedAssetTuid}
-            />
-            <AssetGroup
-              kind="foliage"
-              meshes={meshes.foliage_assets ?? []}
-              textures={textureMap}
-              instances={instances}
-              selectedIds={selection.ids}
-              onPick={onPick}
-              visible={view.showFoliage}
-              edits={edits.edits}
-              prioritizedAssetTuid={prioritizedAssetTuid}
-            />
+            {/*
+              Mount in phases so heavier kinds don't fight with mobys for
+              the first frames after a level loads. Phase advances
+              automatically (see `renderPhase` useEffect): mobys → ties
+              → details/shrubs/foliage → ufrags. AssetGroups for kinds
+              that have 0 placements skip rendering anyway, but gating
+              the mount also saves a useMemo + useEffect setup cost.
+            */}
             <AssetGroup
               kind="moby"
               meshes={meshes.moby_assets}
@@ -2666,24 +2896,76 @@ export function Viewport({
               edits={edits.edits}
               prioritizedAssetTuid={prioritizedAssetTuid}
             />
-            <UFragMeshGroup
-              meshes={meshes.ufrag_meshes}
-              textures={textureMap}
-              visible={view.showUFrags}
-              selectedTuid={selection.primary}
-              onPickUFrag={(u, e) => {
-                const synthetic: InstanceData = {
-                  tuid: u.tuid,
-                  asset_tuid: u.tuid,
-                  kind: "ufrag",
-                  name: `UFrag ${u.tuid.slice(-8)}`,
-                  position: u.position,
-                  quaternion: [0, 0, 0, 1],
-                  scale: [1, 1, 1],
-                };
-                selection.select(synthetic, clickMods(e.nativeEvent));
-              }}
-            />
+            {renderPhase >= 1 && (
+              <AssetGroup
+                kind="tie"
+                meshes={meshes.tie_assets}
+                textures={textureMap}
+                instances={instances}
+                selectedIds={selection.ids}
+                onPick={onPick}
+                visible={view.showTies}
+                edits={edits.edits}
+                prioritizedAssetTuid={prioritizedAssetTuid}
+              />
+            )}
+            {renderPhase >= 2 && (
+              <>
+                <AssetGroup
+                  kind="detail"
+                  meshes={meshes.detail_assets ?? []}
+                  textures={textureMap}
+                  instances={instances}
+                  selectedIds={selection.ids}
+                  onPick={onPick}
+                  visible={view.showDetails}
+                  edits={edits.edits}
+                  prioritizedAssetTuid={prioritizedAssetTuid}
+                />
+                <AssetGroup
+                  kind="shrub"
+                  meshes={meshes.shrub_assets ?? []}
+                  textures={textureMap}
+                  instances={instances}
+                  selectedIds={selection.ids}
+                  onPick={onPick}
+                  visible={view.showShrubs}
+                  edits={edits.edits}
+                  prioritizedAssetTuid={prioritizedAssetTuid}
+                />
+                <AssetGroup
+                  kind="foliage"
+                  meshes={meshes.foliage_assets ?? []}
+                  textures={textureMap}
+                  instances={instances}
+                  selectedIds={selection.ids}
+                  onPick={onPick}
+                  visible={view.showFoliage}
+                  edits={edits.edits}
+                  prioritizedAssetTuid={prioritizedAssetTuid}
+                />
+              </>
+            )}
+            {renderPhase >= 3 && (
+              <UFragMeshGroup
+                meshes={meshes.ufrag_meshes}
+                textures={textureMap}
+                visible={view.showUFrags}
+                selectedTuid={selection.primary}
+                onPickUFrag={(u, e) => {
+                  const synthetic: InstanceData = {
+                    tuid: u.tuid,
+                    asset_tuid: u.tuid,
+                    kind: "ufrag",
+                    name: `UFrag ${u.tuid.slice(-8)}`,
+                    position: u.position,
+                    quaternion: [0, 0, 0, 1],
+                    scale: [1, 1, 1],
+                  };
+                  selection.select(synthetic, clickMods(e.nativeEvent));
+                }}
+              />
+            )}
           </>
         )}
 
@@ -2728,6 +3010,7 @@ export function Viewport({
         )}
 
         <OrbitControls
+          ref={orbitRef}
           makeDefault
           enableDamping
           dampingFactor={0.1}
@@ -2755,7 +3038,10 @@ export function Viewport({
         />
         <FpsSampler />
         <GizmoHelper alignment="top-right" margin={[72, 72]}>
-          <GizmoViewportSixAxis />
+          <GizmoViewport
+            axisColors={[AXIS_X_COLOR, AXIS_Y_COLOR, AXIS_Z_COLOR]}
+            labelColor="#ffffff"
+          />
         </GizmoHelper>
       </Canvas>
 
@@ -2785,14 +3071,8 @@ export function Viewport({
         ))}
       </div>
 
-      <div className="viewport-overlay">
-        drag <span className="kbd">LMB</span> orbit · scroll zoom · drag{" "}
-        <span className="kbd">RMB</span> pan ·{" "}
-        <span className="kbd">G</span>/<span className="kbd">R</span>/
-        <span className="kbd">S</span> transform · <span className="kbd">F</span> focus ·{" "}
-        <span className="kbd">Num1</span>/<span className="kbd">Num3</span>/
-        <span className="kbd">Num7</span> view
-      </div>
+      <ZoomSlider orbitRef={orbitRef} extent={extent} />
+
       </div>
 
       <div className="viewport-statusbar">

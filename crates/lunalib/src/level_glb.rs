@@ -10,8 +10,11 @@ use gltf_json::{
     Index,
 };
 
+use crate::animation::DecodedClip;
 use crate::error::{Error, Result};
-use crate::gltf_export::serialize_glb;
+use crate::gltf_export::{append_moby_to_doc, serialize_glb, GltfDocBuilder};
+use crate::moby::MobyAsset;
+use crate::shader::ShaderInfo;
 
 pub struct LevelGlbSubmesh {
     pub positions: Vec<f32>,
@@ -320,6 +323,141 @@ fn pad_align(bin: &mut Vec<u8>, align: usize) -> usize {
         bin.push(0);
     }
     bin.len()
+}
+
+pub struct SkinnedPlacement {
+    pub asset: MobyAsset,
+    pub clips: Vec<DecodedClip>,
+    pub name: String,
+    pub translation: [f32; 3],
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
+}
+
+pub fn write_animated_level_glb(
+    static_assets: &[LevelGlbAsset],
+    static_instances: &[LevelGlbInstance],
+    skinned_placements: &[SkinnedPlacement],
+    shaders: &HashMap<u64, ShaderInfo>,
+    textures: &HashMap<u32, Vec<u8>>,
+) -> Result<Vec<u8>> {
+    let static_glb = write_static_level_glb(static_assets, static_instances, textures)?;
+    let (static_root, static_bin) = strip_glb(&static_glb)?;
+
+    let mut doc = GltfDocBuilder::new();
+    doc.bin = static_bin;
+    doc.accessors = static_root.accessors;
+    doc.buffer_views = static_root.buffer_views;
+    doc.nodes = static_root.nodes;
+    doc.materials = static_root.materials;
+    doc.images = static_root.images;
+    doc.gltf_textures = static_root.textures;
+    doc.meshes = static_root.meshes;
+    let mut scene_roots: Vec<Index<gltf_json::Node>> = static_root
+        .scenes
+        .first()
+        .map(|s| s.nodes.clone())
+        .unwrap_or_default();
+
+    for placement in skinned_placements {
+        while doc.bin.len() % 4 != 0 {
+            doc.bin.push(0);
+        }
+        let root_idx = append_moby_to_doc(
+            &mut doc,
+            &placement.asset,
+            &placement.clips,
+            shaders,
+            textures,
+            Some((placement.translation, placement.rotation, placement.scale)),
+        )?;
+        if !placement.name.is_empty() {
+            doc.nodes[root_idx as usize].name = Some(placement.name.clone());
+        }
+        scene_roots.push(Index::new(root_idx));
+    }
+
+    while doc.bin.len() % 4 != 0 {
+        doc.bin.push(0);
+    }
+
+    let GltfDocBuilder {
+        bin,
+        accessors,
+        buffer_views,
+        nodes,
+        skins,
+        animations,
+        images,
+        gltf_textures,
+        materials,
+        meshes,
+        image_idx_by_tex_id: _,
+    } = doc;
+
+    let buffer = gltf_json::Buffer {
+        byte_length: USize64(bin.len() as u64),
+        extensions: Default::default(),
+        extras: Default::default(),
+        name: None,
+        uri: None,
+    };
+
+    let scene = gltf_json::Scene {
+        extensions: Default::default(),
+        extras: Default::default(),
+        name: Some("level".into()),
+        nodes: scene_roots,
+    };
+
+    let root = gltf_json::Root {
+        accessors,
+        animations,
+        buffers: vec![buffer],
+        buffer_views,
+        images,
+        materials,
+        meshes,
+        nodes,
+        scene: Some(Index::new(0)),
+        scenes: vec![scene],
+        skins,
+        textures: gltf_textures,
+        ..Default::default()
+    };
+
+    serialize_glb(&root, &bin)
+}
+
+fn strip_glb(glb: &[u8]) -> Result<(gltf_json::Root, Vec<u8>)> {
+    if glb.len() < 28 || &glb[0..4] != b"glTF" {
+        return Err(Error::GltfWrite("invalid GLB magic".into()));
+    }
+    let json_len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+    if &glb[16..20] != b"JSON" {
+        return Err(Error::GltfWrite("GLB chunk 0 is not JSON".into()));
+    }
+    let json_end = 20 + json_len;
+    if glb.len() < json_end + 8 {
+        return Err(Error::GltfWrite("GLB truncated before BIN chunk".into()));
+    }
+    let bin_len = u32::from_le_bytes(glb[json_end..json_end + 4].try_into().unwrap()) as usize;
+    if &glb[json_end + 4..json_end + 8] != b"BIN\0" {
+        return Err(Error::GltfWrite("GLB chunk 1 is not BIN".into()));
+    }
+    let json_bytes = &glb[20..json_end];
+    let bin_bytes = &glb[json_end + 8..json_end + 8 + bin_len];
+    let root: gltf_json::Root = serde_json::from_slice(trim_padding(json_bytes))
+        .map_err(|e| Error::GltfWrite(format!("parse static GLB JSON: {e}")))?;
+    Ok((root, bin_bytes.to_vec()))
+}
+
+fn trim_padding(bytes: &[u8]) -> &[u8] {
+    let mut end = bytes.len();
+    while end > 0 && (bytes[end - 1] == 0x20 || bytes[end - 1] == 0x00) {
+        end -= 1;
+    }
+    &bytes[..end]
 }
 
 fn bounds(positions: &[f32]) -> ([f32; 3], [f32; 3]) {

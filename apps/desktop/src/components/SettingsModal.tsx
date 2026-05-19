@@ -102,8 +102,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     },
     {
       key: "sky",
-      label: "Skybox",
-      hint: "Sky dome badge + viewport tint",
+      label: "Cubemap",
+      hint: "Cubemap badge + viewport tint",
     },
     { key: "ufrag", label: t("settings.ufrag"), hint: t("settings.ufragHint") },
     {

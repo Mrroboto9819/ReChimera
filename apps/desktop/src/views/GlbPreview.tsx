@@ -38,6 +38,60 @@ interface LoadedGlb {
   dispose: () => void;
 }
 
+const MATERIAL_TEXTURE_SLOTS = [
+  "map",
+  "normalMap",
+  "roughnessMap",
+  "metalnessMap",
+  "emissiveMap",
+  "aoMap",
+  "alphaMap",
+  "bumpMap",
+  "displacementMap",
+  "envMap",
+  "lightMap",
+  "clearcoatMap",
+  "clearcoatRoughnessMap",
+  "clearcoatNormalMap",
+  "sheenColorMap",
+  "specularIntensityMap",
+  "specularColorMap",
+  "transmissionMap",
+  "thicknessMap",
+] as const;
+
+function disposeGltfScene(scene: THREE.Object3D): void {
+  const seenMaterials = new Set<THREE.Material>();
+  const seenTextures = new Set<THREE.Texture>();
+  scene.traverse((obj) => {
+    const mesh = obj as THREE.Mesh & { skeleton?: THREE.Skeleton };
+    if (mesh.isMesh) {
+      mesh.geometry?.dispose();
+      const mats = Array.isArray(mesh.material)
+        ? mesh.material
+        : mesh.material
+          ? [mesh.material]
+          : [];
+      for (const mat of mats) {
+        if (seenMaterials.has(mat)) continue;
+        seenMaterials.add(mat);
+        for (const slot of MATERIAL_TEXTURE_SLOTS) {
+          const tex = (mat as unknown as Record<string, unknown>)[slot];
+          if (tex instanceof THREE.Texture && !seenTextures.has(tex)) {
+            seenTextures.add(tex);
+            tex.dispose();
+          }
+        }
+        mat.dispose();
+      }
+    }
+    if ((obj as THREE.SkinnedMesh).isSkinnedMesh) {
+      const skinned = obj as THREE.SkinnedMesh;
+      skinned.skeleton?.dispose?.();
+    }
+  });
+}
+
 export function GlbPreview({
   folder,
   assetTuidHex,
@@ -183,20 +237,7 @@ export function GlbPreview({
             setLoaded({
               scene: gltf.scene,
               animations: gltf.animations,
-              dispose: () => {
-                gltf.scene.traverse((obj) => {
-                  if ((obj as THREE.Mesh).isMesh) {
-                    const mesh = obj as THREE.Mesh;
-                    mesh.geometry?.dispose();
-                    const mat = mesh.material;
-                    if (Array.isArray(mat)) {
-                      for (const m of mat) m.dispose();
-                    } else if (mat) {
-                      mat.dispose();
-                    }
-                  }
-                });
-              },
+              dispose: () => disposeGltfScene(gltf.scene),
             });
             if (gltf.animations.length > 0) {
               setActiveClipKey(`builtin:${gltf.animations[0]!.name}`);

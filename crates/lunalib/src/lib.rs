@@ -3,11 +3,15 @@
 
 pub mod animation;
 pub mod assetlookup;
+pub mod cubemap;
 pub mod error;
 pub mod dds;
 pub mod detail_rfom;
 pub mod shrub_rfom;
 pub mod foliage_rfom;
+pub mod fbx_binary_export;
+pub mod fbx_export;
+pub mod fbx_node;
 pub mod gltf_export;
 pub mod level_glb;
 pub mod lighting_rfom;
@@ -54,6 +58,15 @@ pub use animation::{
 };
 pub use assetlookup::{AssetKind, AssetLookup, AssetPointer};
 pub use error::{Error, Result};
+pub use fbx_binary_export::{
+    write_animated_level_fbx_binary as write_animated_level_fbx,
+    write_moby_fbx_binary as write_moby_fbx,
+};
+pub use fbx_export::{
+    write_animated_level_fbx as write_animated_level_fbx_ascii,
+    write_moby_fbx as write_moby_fbx_ascii,
+    write_static_level_fbx as write_static_level_fbx_ascii,
+};
 pub use gltf_export::{
     write_moby_geometry_glb, write_moby_glb_full, write_moby_glb_with_animations,
 };
@@ -80,6 +93,7 @@ pub use moby_old::{read_moby_assets_old, read_moby_assets_old_with_total};
 pub use moby_rfom::{read_moby_assets_rfom, read_moby_assets_rfom_with_total};
 pub use shader_old::read_shaders_old;
 pub use shader_rfom::read_shaders_rfom;
+pub use cubemap::{read_cubemaps, Cubemap, CubemapFace};
 pub use texture::decode_format;
 pub use texture_old::{read_textures_old, texture_to_png};
 pub use texture_rfom::{read_textures_rfom, texture_rfom_to_png};

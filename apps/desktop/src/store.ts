@@ -298,11 +298,14 @@ export interface AssetColors {
   proxy: string;
 }
 
+export type ExportFormat = "glb" | "fbx";
+
 export interface SettingsState {
   theme: ThemeMode;
   brandColor: string;
   assetColors: AssetColors;
   language: Language;
+  lastExportFormat: ExportFormat;
 }
 
 const DEFAULT_SETTINGS: SettingsState = {
@@ -322,6 +325,7 @@ const DEFAULT_SETTINGS: SettingsState = {
     proxy: "#8a8a8a",
   },
   language: "en",
+  lastExportFormat: "glb",
 };
 
 const settingsSlice = createSlice({
@@ -346,6 +350,9 @@ const settingsSlice = createSlice({
     setLanguage(state, action: PayloadAction<Language>) {
       state.language = action.payload;
     },
+    setLastExportFormat(state, action: PayloadAction<ExportFormat>) {
+      state.lastExportFormat = action.payload;
+    },
     resetSettings() {
       return DEFAULT_SETTINGS;
     },
@@ -358,6 +365,7 @@ export const {
   setBrandColor,
   setAssetColor,
   setLanguage,
+  setLastExportFormat,
   resetSettings,
 } = settingsSlice.actions;
 

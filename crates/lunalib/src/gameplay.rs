@@ -46,13 +46,71 @@ pub fn read_gameplay(level_folder: &Path) -> Result<GameplayLayout> {
     let gameplay_path = level_folder.join("gameplay.dat");
     let gp_file = File::open(&gameplay_path)?;
     let mut gameplay = IgFile::open(BufReader::new(gp_file))?;
+    let log = std::env::var("RECHIMERA_LOG_PROBES").is_ok();
 
     let region_names = read_region_names(&mut gameplay)?;
+    if log {
+        eprintln!(
+            "[v2-gp] gameplay.dat region names: {:?}",
+            region_names
+        );
+    }
 
     let mut regions = Vec::with_capacity(region_names.len());
+    let mut total_placements = 0usize;
     for name in region_names {
-        let region = read_region(level_folder, &name)?;
-        regions.push(region);
+        match read_region(level_folder, &name) {
+            Ok(region) => {
+                if log {
+                    eprintln!(
+                        "[v2-gp]   region '{}': {} moby placements",
+                        name,
+                        region.moby_instances.len()
+                    );
+                    let sample: Vec<String> = region
+                        .moby_instances
+                        .iter()
+                        .take(10)
+                        .map(|inst| format!("0x{:016X}", inst.moby_tuid))
+                        .collect();
+                    eprintln!(
+                        "[v2-gp]   region '{}' first 10 placement tuids: {:?}",
+                        name, sample
+                    );
+                    let unique: std::collections::HashSet<u64> = region
+                        .moby_instances
+                        .iter()
+                        .map(|inst| inst.moby_tuid)
+                        .collect();
+                    let zero_count = region
+                        .moby_instances
+                        .iter()
+                        .filter(|inst| inst.moby_tuid == 0)
+                        .count();
+                    eprintln!(
+                        "[v2-gp]   region '{}' unique placement tuids: {} ({} are 0x0000…)",
+                        name,
+                        unique.len(),
+                        zero_count
+                    );
+                }
+                total_placements += region.moby_instances.len();
+                regions.push(region);
+            }
+            Err(e) => {
+                eprintln!(
+                    "[v2-gp]   region '{}': SKIPPED — {}",
+                    name, e
+                );
+            }
+        }
+    }
+    if log {
+        eprintln!(
+            "[v2-gp] total moby placements across {} regions: {}",
+            regions.len(),
+            total_placements
+        );
     }
     Ok(GameplayLayout { regions })
 }
@@ -98,6 +156,24 @@ fn read_region(level_folder: &Path, name: &str) -> Result<Region> {
     let inst_section = prius.require_section(SECT_PRIUS_MOBY_INSTANCES)?;
     let meta_section = prius.require_section(SECT_PRIUS_MOBY_METADATA)?;
     let tuid_section = region.require_section(SECT_REGION_MOBY_TUIDS)?;
+
+    if std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
+        eprintln!(
+            "[v2-gp-probe] inst section 0x{:X}: offset=0x{:X} count={} length={}",
+            SECT_PRIUS_MOBY_INSTANCES,
+            inst_section.offset, inst_section.count, inst_section.length
+        );
+        eprintln!(
+            "[v2-gp-probe] meta section 0x{:X}: offset=0x{:X} count={} length={}",
+            SECT_PRIUS_MOBY_METADATA,
+            meta_section.offset, meta_section.count, meta_section.length
+        );
+        eprintln!(
+            "[v2-gp-probe] region tuid table 0x{:X}: offset=0x{:X} count={} length={}",
+            SECT_REGION_MOBY_TUIDS,
+            tuid_section.offset, tuid_section.count, tuid_section.length
+        );
+    }
 
     let count = inst_section.count as usize;
 

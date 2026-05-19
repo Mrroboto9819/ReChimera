@@ -17,9 +17,15 @@ const SECT_UFRAG_SHADER_TABLE: u32 = 0x71A0;
 const SECT_TIE_TUID_TABLE: u32 = 0x7200;
 const SECT_TIE_INSTANCES: u32 = 0x7240;
 const SECT_TIE_NAME_POINTERS: u32 = 0x72C0;
+const SECT_FOLIAGE_TUID_TABLE: u32 = 0x7400;
+const SECT_FOLIAGE_INSTANCES: u32 = 0x7440;
+const SECT_SHRUB_TUID_TABLE: u32 = 0x7500;
+const SECT_SHRUB_INSTANCES: u32 = 0x7540;
 
 const TIE_INSTANCE_SIZE: u64 = 0x80;
 const NAME_POINTER_SIZE: u64 = 0x10;
+const SHRUB_INSTANCE_SIZE: u64 = 0x40;
+const FOLIAGE_INSTANCE_SIZE: u64 = 0xB0;
 const UFRAG_SIZE: u64 = 0x80;
 const UFRAG_VERTEX_STRIDE: usize = 0x18;
 
@@ -36,13 +42,21 @@ const UFRAG_VERTEX_STRIDE: usize = 0x18;
 /// This V2 path serves R2 / R3 / RCFFA / A4O. RFOM uses
 /// `region_rfom.rs` which intentionally does NOT scale (raw values
 /// match the moby/tie placement unit system on that game).
-const UFRAG_VERTEX_SCALE: f32 = 0.9144 / 256.0;
+// IT applies `* YARD_TO_M / 256` to ufrag positions
+// (extract_gltf.cpp:882-883). We intentionally drop the YARD_TO_M factor
+// here so ufrag world coords stay in the same units as moby/tie
+// placements (raw yards), which is what the rest of the V2 pipeline +
+// camera framing assume. Otherwise terrain ends up ~9% smaller than the
+// mobys/ties placed on top of it.
+const UFRAG_VERTEX_SCALE: f32 = 1.0 / 256.0;
 
 #[derive(Debug, Clone)]
 pub struct Zone {
 
     pub tuid: u64,
     pub tie_instances: Vec<TieInstance>,
+    pub shrub_instances: Vec<TieInstance>,
+    pub foliage_instances: Vec<TieInstance>,
     pub ufrags: Vec<UFrag>,
 
     pub ufrag_shader_tuids: Vec<u64>,
@@ -131,6 +145,8 @@ where
 fn parse_zone<R: Read + Seek>(zone: &mut IgFile<R>, zone_tuid: u64) -> Result<Zone> {
     let ufrags = parse_ufrags(zone)?;
     let ufrag_shader_tuids = read_shader_table(zone, SECT_UFRAG_SHADER_TABLE)?;
+    let shrub_instances = parse_shrub_instances(zone, zone_tuid)?;
+    let foliage_instances = parse_foliage_instances(zone, zone_tuid)?;
 
     let inst_section = match zone.section(SECT_TIE_INSTANCES) {
         Some(s) => s,
@@ -139,6 +155,8 @@ fn parse_zone<R: Read + Seek>(zone: &mut IgFile<R>, zone_tuid: u64) -> Result<Zo
             return Ok(Zone {
                 tuid: zone_tuid,
                 tie_instances: Vec::new(),
+                shrub_instances,
+                foliage_instances,
                 ufrags,
                 ufrag_shader_tuids,
             });
@@ -152,6 +170,8 @@ fn parse_zone<R: Read + Seek>(zone: &mut IgFile<R>, zone_tuid: u64) -> Result<Zo
         return Ok(Zone {
             tuid: zone_tuid,
             tie_instances: Vec::new(),
+            shrub_instances,
+            foliage_instances,
             ufrags,
             ufrag_shader_tuids,
         });
@@ -221,9 +241,128 @@ fn parse_zone<R: Read + Seek>(zone: &mut IgFile<R>, zone_tuid: u64) -> Result<Zo
     Ok(Zone {
         tuid: zone_tuid,
         tie_instances,
+        shrub_instances,
+        foliage_instances,
         ufrags,
         ufrag_shader_tuids,
     })
+}
+
+fn parse_shrub_instances<R: Read + Seek>(
+    zone: &mut IgFile<R>,
+    zone_tuid: u64,
+) -> Result<Vec<TieInstance>> {
+    let Some(inst_section) = zone.section(SECT_SHRUB_INSTANCES) else {
+        return Ok(Vec::new());
+    };
+    let Some(tuid_section) = zone.section(SECT_SHRUB_TUID_TABLE) else {
+        return Ok(Vec::new());
+    };
+    let count = inst_section.count as usize;
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let base = u64::from(inst_section.offset) + (i as u64) * SHRUB_INSTANCE_SIZE;
+        zone.stream.seek_to(base + 0x00)?;
+        let position = zone.stream.read_vec3()?;
+        let scale = zone.stream.read_f32()?;
+        zone.stream.seek_to(base + 0x10)?;
+        let r1 = zone.stream.read_vec3()?;
+        zone.stream.seek_to(base + 0x20)?;
+        let r2 = zone.stream.read_vec3()?;
+        zone.stream.seek_to(base + 0x3C)?;
+        let shrub_index = zone.stream.read_u32()?;
+
+        let r3 = [
+            r1[1] * r2[2] - r1[2] * r2[1],
+            r1[2] * r2[0] - r1[0] * r2[2],
+            r1[0] * r2[1] - r1[1] * r2[0],
+        ];
+        let matrix = [
+            r1[0] * scale, r1[1] * scale, r1[2] * scale, 0.0,
+            r2[0] * scale, r2[1] * scale, r2[2] * scale, 0.0,
+            r3[0] * scale, r3[1] * scale, r3[2] * scale, 0.0,
+            position[0],   position[1],   position[2],   1.0,
+        ];
+        let (pos, scl, quat) = decompose_row_major(&matrix);
+
+        let byte_offset = u64::from(shrub_index)
+            .checked_mul(8)
+            .and_then(|x| x.checked_add(u64::from(tuid_section.offset)))
+            .ok_or(Error::OffsetOverflow { id: SECT_SHRUB_TUID_TABLE })?;
+        zone.stream.seek_to(byte_offset)?;
+        let shrub_tuid = zone.stream.read_u64()?;
+
+        let instance_tuid = synthetic_instance_tuid(zone_tuid, b'S', i as u32);
+        out.push(TieInstance {
+            tie_tuid: shrub_tuid,
+            instance_tuid,
+            name: String::new(),
+            position: pos,
+            quaternion: quat,
+            scale: scl,
+            bounding_radius: 0.0,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_foliage_instances<R: Read + Seek>(
+    zone: &mut IgFile<R>,
+    zone_tuid: u64,
+) -> Result<Vec<TieInstance>> {
+    let Some(inst_section) = zone.section(SECT_FOLIAGE_INSTANCES) else {
+        return Ok(Vec::new());
+    };
+    let Some(tuid_section) = zone.section(SECT_FOLIAGE_TUID_TABLE) else {
+        return Ok(Vec::new());
+    };
+    let count = inst_section.count as usize;
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let base = u64::from(inst_section.offset) + (i as u64) * FOLIAGE_INSTANCE_SIZE;
+        zone.stream.seek_to(base)?;
+        let mut matrix = [0f32; 16];
+        for slot in matrix.iter_mut() {
+            *slot = zone.stream.read_f32()?;
+        }
+        let (pos, scl, quat) = decompose_row_major(&matrix);
+
+        zone.stream.seek_to(base + 0x94)?;
+        let foliage_index = zone.stream.read_u32()?;
+
+        let byte_offset = u64::from(foliage_index)
+            .checked_mul(8)
+            .and_then(|x| x.checked_add(u64::from(tuid_section.offset)))
+            .ok_or(Error::OffsetOverflow { id: SECT_FOLIAGE_TUID_TABLE })?;
+        zone.stream.seek_to(byte_offset)?;
+        let foliage_tuid = zone.stream.read_u64()?;
+
+        let instance_tuid = synthetic_instance_tuid(zone_tuid, b'F', i as u32);
+        out.push(TieInstance {
+            tie_tuid: foliage_tuid,
+            instance_tuid,
+            name: String::new(),
+            position: pos,
+            quaternion: quat,
+            scale: scl,
+            bounding_radius: 0.0,
+        });
+    }
+    Ok(out)
+}
+
+fn synthetic_instance_tuid(zone_tuid: u64, kind: u8, index: u32) -> u64 {
+    let tag = (kind as u64) << 56;
+    let zone_low = (zone_tuid & 0x00FF_FFFF_FFFF_FFFF) ^ ((index as u64) << 32);
+    tag | (zone_low & 0x00FF_FFFF_FFFF_FFFF) | (index as u64)
 }
 
 fn parse_ufrags<R: Read + Seek>(zone: &mut IgFile<R>) -> Result<Vec<UFrag>> {
@@ -251,7 +390,7 @@ fn parse_ufrags<R: Read + Seek>(zone: &mut IgFile<R>) -> Result<Vec<UFrag>> {
         zone.stream.seek_to(base + 0x00)?;
         let tuid = zone.stream.read_u64()?;
 
-        zone.stream.seek_to(base + 0x30)?;
+        zone.stream.seek_to(base + 0x60)?;
         let position_raw = zone.stream.read_vec3()?;
         let position = [
             position_raw[0] * UFRAG_VERTEX_SCALE,

@@ -102,7 +102,33 @@ export function Select({
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (options.length === 0) return;
+        const enabled = options
+          .map((o, i) => ({ o, i }))
+          .filter(({ o }) => !o.disabled);
+        if (enabled.length === 0) return;
+        const currentIdx = enabled.findIndex(({ o }) => o.value === value);
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        const nextPos =
+          currentIdx < 0
+            ? step > 0
+              ? 0
+              : enabled.length - 1
+            : (currentIdx + step + enabled.length) % enabled.length;
+        const next = enabled[nextPos];
+        if (next) onChange(next.o.value);
+        return;
+      }
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        setOpen(false);
+      }
     };
     document.addEventListener("pointerdown", onDocPointer, true);
     document.addEventListener("keydown", onKey);
@@ -110,7 +136,19 @@ export function Select({
       document.removeEventListener("pointerdown", onDocPointer, true);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, options, value, onChange]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const list = listRef.current;
+    if (!list) return;
+    const selected = list.querySelector<HTMLLIElement>(
+      ".select-option.is-selected",
+    );
+    if (selected) {
+      selected.scrollIntoView({ block: "nearest" });
+    }
+  }, [open, value]);
 
   const buttonLabel = current?.label ?? placeholder;
   const buttonHint = current?.hint;
