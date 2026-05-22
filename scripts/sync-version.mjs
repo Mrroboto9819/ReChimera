@@ -15,7 +15,10 @@
  *
  *                   - Computes a canary version `${base}-canary.${suffix}`
  *                     where `base` is the Cargo.toml version and `suffix`
- *                     defaults to `git rev-parse --short HEAD`.
+ *                     defaults to `git rev-list --count HEAD` (a monotonic
+ *                     integer — the MSI bundler requires the pre-release
+ *                     identifier to be numeric and <= 65535, which rules
+ *                     out hex SHAs).
  *                   - Patches apps/desktop/src-tauri/tauri.conf.json:
  *                       version, productName, identifier, updater endpoint.
  *                     Does NOT touch Cargo.toml or package.json (matches CI,
@@ -30,17 +33,17 @@
  *
  *                 To undo: `git checkout -- apps/desktop/src-tauri/{tauri.conf.json,icons} apps/desktop/src/store.ts`.
  *
- * --suffix=<x>    Overrides the auto-detected SHA suffix. Useful for
- *                 reproducing a specific canary build locally
- *                 (e.g. `--suffix=a1b2c3d`) or for arbitrary pre-release
- *                 labels (`--suffix=alpha.3` -> `0.3.5-canary.alpha.3`).
+ * --suffix=<n>    Overrides the auto-detected suffix with a custom integer.
+ *                 Must be a non-negative number <= 65535 (MSI bundle limit).
+ *                 Useful for reproducing a specific canary build locally
+ *                 or pinning a friendly version like `--suffix=99`.
  *                 Implies --canary.
  *
  * Usage:
  *   node scripts/sync-version.mjs                     # stable sync
  *   node scripts/sync-version.mjs --check             # CI gate
  *   node scripts/sync-version.mjs --canary            # canary prep
- *   node scripts/sync-version.mjs --canary --suffix=a1b2c3d
+ *   node scripts/sync-version.mjs --canary --suffix=42
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -156,32 +159,52 @@ function runCanary() {
 }
 
 function resolveSuffix() {
+  // The MSI bundle target requires the version's pre-release identifier to
+  // be numeric-only and <= 65535. That rules out hex SHAs. Default auto-mode
+  // uses `git rev-list --count HEAD` (monotonic integer that increments on
+  // every commit — deterministic for a given commit, so re-running --canary
+  // at the same HEAD is idempotent). The --suffix= escape hatch still
+  // accepts any numeric value the user wants to pin.
   if (suffixArg) {
     const value = suffixArg.slice("--suffix=".length).trim();
     if (!value) {
       console.error("[sync-version] --suffix= was passed with no value");
       process.exit(1);
     }
-    if (!/^[A-Za-z0-9.-]+$/.test(value)) {
+    if (!/^\d+$/.test(value)) {
       console.error(
-        `[sync-version] suffix "${value}" contains characters that aren't valid in a SemVer pre-release identifier`,
+        `[sync-version] suffix "${value}" must be numeric-only (MSI bundle requirement). Try a number like --suffix=42.`,
+      );
+      process.exit(1);
+    }
+    const numeric = Number(value);
+    if (numeric > 65535) {
+      console.error(
+        `[sync-version] suffix ${value} exceeds the MSI cap of 65535. Pick a smaller number.`,
       );
       process.exit(1);
     }
     return value;
   }
-  const r = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
+  const r = spawnSync("git", ["rev-list", "--count", "HEAD"], {
     cwd: repoRoot,
     encoding: "utf-8",
   });
   if (r.status !== 0) {
     console.error(
-      "[sync-version] could not auto-detect SHA via `git rev-parse --short HEAD` — pass --suffix=<value> instead.",
+      "[sync-version] could not auto-detect commit count via `git rev-list --count HEAD` — pass --suffix=<numeric value> instead.",
     );
     if (r.stderr) console.error(r.stderr.trim());
     process.exit(1);
   }
-  return r.stdout.trim();
+  const count = r.stdout.trim();
+  if (Number(count) > 65535) {
+    console.error(
+      `[sync-version] commit count ${count} exceeds the MSI cap of 65535. Pick a custom --suffix=<n> instead.`,
+    );
+    process.exit(1);
+  }
+  return count;
 }
 
 function patchTauriConfForCanary(canaryVersion) {

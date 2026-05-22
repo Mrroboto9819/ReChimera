@@ -42,6 +42,22 @@ bun run tauri:dev      # dev window with hot-reload
 bun run tauri:build    # installers into src-tauri/target/release/bundle/
 ```
 
+## Acknowledgements
+
+ReChimera builds on years of community reverse-engineering on Insomniac's PS3 engine. None of this would exist without the people and projects below.
+
+**People**
+- **[@VELD-Dev](https://github.com/VELD-Dev)** — author and current maintainer of [ReLunacy](https://github.com/VELD-Dev/ReLunacy), the C# / Unity predecessor that ReChimera's core parser approach ports from.
+- **[@NefariousTechSupport](https://github.com/NefariousTechSupport)** — original developer of Lunacy and one of the key reverse engineers for these titles. The renderer is directly inspired by [7th igRewrite](https://github.com/NefariousTechSupport/7thigRewrite).
+- **[@PredatorCZ](https://github.com/PredatorCZ)** — author of [InsomniaToolset](https://github.com/PredatorCZ/InsomniaToolset) and the [Spike framework](https://github.com/PredatorCZ/Spike). Many section IDs, struct layouts, and the RFOM `levelmain` decode path here come from cross-referencing their headers.
+- **[@Nooga](https://github.com/Nooga)** — artist behind ReLunacy's logo, which set the visual identity this project follows.
+
+**Reference projects**
+- [ReLunacy / LibLunacy](https://github.com/VELD-Dev/ReLunacy) (GPL-3.0) — C# / Unity predecessor; canonical reference for the V2 path (R2 / R3 / RCF / A4O / ACiT) and TOD moby / tie decode.
+- [InsomniaToolset](https://github.com/PredatorCZ/InsomniaToolset) (GPL-3.0) — canonical reference for the IGHW container, RFOM `levelmain` extract, foliage / shrub / animation decode, and the V2 glTF emit pipeline.
+- [Spike framework](https://github.com/PredatorCZ/Spike) (BSD-3-Clause).
+- [7th igRewrite](https://github.com/NefariousTechSupport/7thigRewrite).
+
 ## License
 
-**GPL-3.0-or-later** — see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). Built on the format research from [ReLunacy](https://github.com/VELD-Dev/ReLunacy) ([@VELD-Dev](https://github.com/VELD-Dev)), [Lunacy / 7th igRewrite](https://github.com/NefariousTechSupport/7thigRewrite) ([@NefariousTechSupport](https://github.com/NefariousTechSupport)), and [InsomniaToolset](https://github.com/PredatorCZ/InsomniaToolset) ([@PredatorCZ](https://github.com/PredatorCZ)).
+**GPL-3.0-or-later** — see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). The licence is dictated by upstream: InsomniaToolset and ReLunacy / LibLunacy are GPL-3.0, and that propagates into derivative works.

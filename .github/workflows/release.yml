@@ -45,13 +45,14 @@ jobs:
       brand_color: ${{ steps.compute.outputs.brand_color }}
       icon_source: ${{ steps.compute.outputs.icon_source }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Determine channel from branch
         id: compute
         env:
           REPO: ${{ github.repository }}
           REF: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
           BASE_VERSION=$(jq -r '.version' apps/desktop/package.json)
@@ -75,9 +76,13 @@ jobs:
               ;;
             develop)
               CHANNEL=canary
-              VERSION="${BASE_VERSION}-canary.${SHORT_SHA}"
+              # MSI's pre-release identifier must be numeric-only and <= 65535.
+              # That rules out hex SHAs. We use github.run_number (monotonic
+              # integer that increments every workflow run) for the version,
+              # and surface the SHA in the release name + body for traceability.
+              VERSION="${BASE_VERSION}-canary.${RUN_NUMBER}"
               TAG="canary-v$VERSION"
-              RELEASE_NAME="Canary v$VERSION"
+              RELEASE_NAME="Canary v$VERSION ($SHORT_SHA)"
               PRODUCT_NAME="ReChimera Canary"
               IDENTIFIER="dev.rechimera.desktop.canary"
               PRERELEASE=true
@@ -124,8 +129,8 @@ jobs:
     outputs:
       should_release: ${{ steps.gate.outputs.should_release }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v1
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
@@ -156,7 +161,7 @@ jobs:
     outputs:
       release_id: ${{ steps.create.outputs.release_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Create draft release
         id: create
@@ -248,7 +253,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -265,7 +270,7 @@ jobs:
         with:
           workspaces: . -> target
 
-      - uses: oven-sh/setup-bun@v1
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
