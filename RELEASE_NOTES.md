@@ -1,10 +1,12 @@
 # Changes vs `origin/develop`
 
-This release is `feature/cache-mdoels-and-optimize-flow-base-on-IT` →
+This release is `feature/fix-RFOM-and-not-all-R&C` →
 `develop` merge. The previous RFOM-heavy round shipped foliage / shrubs
 / skybox / visemes; **this round adds Tools of Destruction and unlocks
 R&C: A Crack in Time experimentally**, plus cross-game cache modal +
-texture pipeline improvements. ACiT levels (both vanilla and
+texture pipeline improvements, the new dual-channel release pipeline
+(stable + canary), and a frontend cleanup that pulls FBX export back
+into the toolbox while it's not yet user-ready. ACiT levels (both vanilla and
 mod-extracted) now open end-to-end with geometry + ties + ufrags +
 ~95% of textures; the remaining gap is shared `.psarc` content and a
 shader-additional-slots question.
@@ -116,6 +118,20 @@ ACiT was previously locked in the wizard. This round opens it up — the game's 
 - **Byte-level annotations** in every parser module (`skybox_rfom`, `shrub_rfom`, `foliage_rfom`, `gameplay_rfom`, ...). Each struct field's offset, type, and meaning is documented inline with hex offsets — so the next person porting from IT or reverse-engineering on top of this can audit the bytes without re-reading the C++ source.
 - **Methodology doc + skill.** The "probe → log → re-extract → range-check → lock" loop we've been running is codified in `docs/internal/lunalib-and-IT/09-debugging-methodology.md` and mirrored into the `/insomnia-toolset` and `/relunacy` skills for future contributors.
 
+## Export pipeline
+
+- **FBX export pulled from the UI.** The frontend "Export FBX (beta)" path and the per-format picker that exposed it are gone — every export menu now goes straight to GLB. The Rust-side FBX writers (`crates/lunalib/src/fbx_export.rs`, `fbx_binary_export.rs`, `fbx_node.rs`, ~3.3 KLoC) landed in the same branch and stay in the workspace as scaffolding, but the Tauri commands are no longer wired into any button. The path will come back once the rotation curves + material round-trip have been validated against Blender / Unreal / Maya end-to-end; until then GLB is the single supported interchange format.
+- **Map export simplified.** The viewport's "Export map" toolbar button is now a plain GLB action; the split-button picker that let you choose between formats was removed alongside the FBX wiring.
+
+## Release infrastructure & tooling
+
+- **Dual-channel release pipeline.** `.github/workflows/release.yml` now drives two release channels off two branches:
+  - **`main` → stable.** Same gated flow as before — only builds when the version in `package.json` has been bumped and no matching `v$VERSION` release exists yet. Updater endpoint stays at `releases/latest/download/latest.json`.
+  - **`develop` → canary.** Every push produces a pre-release tagged `canary-v<base>-canary.<sha7>` with all four platform bundles. A rolling `canary-latest` release holds only the updater manifest so installed canary apps poll a fixed URL while the per-commit releases preserve history.
+- **Canary apps install side-by-side with stable.** Different bundle identifier (`dev.rechimera.desktop.canary`), different product name (`ReChimera Canary`), different default brand color (yellow `#fcd202` vs the stable red `#FF6363`), and a dedicated icon (`apps/desktop/icon_canary.png`) regenerated through `tauri icon` at build time. Each app has its own settings store, so the two installs can coexist without stepping on each other.
+- **`bun run version:canary` for local canary builds.** New flag in `scripts/sync-version.mjs --canary [--suffix=<value>]` mirrors what CI does — patches `tauri.conf.json` (version / productName / identifier / updater endpoint), flips the default `brandColor` in `store.ts`, and regenerates the bundled icon set from `icon_canary.png`. Useful for testing a canary bundle locally before pushing to `develop`. SHA suffix auto-detects from `git rev-parse --short HEAD`; the `--suffix=` escape hatch accepts arbitrary SemVer pre-release identifiers.
+- **Same signing key, two channels.** Updater signatures verify in both apps; the channel separation comes from the bundle identifier and the endpoint URL, not from key separation. GitHub's `releases/latest/` magic skips prereleases, so canary publishes can never poison the stable channel.
+
 # Per-game changes this release
 
 ## Resistance: Fall of Man (the heaviest update this round)
@@ -187,10 +203,13 @@ ACiT was previously locked in the wizard. This round opens it up — the game's 
 - **ACiT external textures** — ~5% of shader-referenced texture IDs (36 on `acid_refinery_pre`, 86 on `nefarious_station`) aren't in the level's own `assetlookup.dat`. These are shared assets in a sibling `.psarc` that needs to be extracted alongside the level (e.g. `common.psarc` / `globals.psarc`). Engine renders default placeholders in-game; our viewport renders gray for these meshes.
 - **ACiT shader extra slots** — `parse_shader` reads only albedo / normal / expensive at `+0x10..+0x18`. If ACiT shaders carry more texture references (detail / lightmap / specular at later offsets), they aren't applied yet. Probe scaffold is in place — see Coming next.
 - **R&C: Full Frontal Assault locked in wizard** — pending re-validation; previously listed as "a few textures still missing" but not retested against the current V2 pipeline.
+- **FBX export not available in this build.** The "Export FBX (beta)" option is intentionally removed from the export menus while we validate the rotation / material / skinning round-trip in Blender / Unreal / Maya. Use GLB in the meantime — it carries the same content (mesh + materials + embedded textures + skinning + animation) and lands cleanly in every major DCC tool we test against.
 
 # Install
 
 Pick the bundle below for your OS. Windows users with the previous build installed will see an **Update** button in the title bar — click it to install in place. macOS / Linux still need a manual reinstall from this page.
+
+**Want pre-release builds?** This release also introduces a separate canary channel published from the `develop` branch. The canary build installs side-by-side with stable (different icon, different identifier, yellow brand color so you can tell them apart at a glance), auto-updates on every commit landed in `develop`, and is intended for testing in-flight work before it ships to stable. Grab the latest canary from the [`canary-latest`](../../releases/tag/canary-latest) release page — the bundles themselves live in the per-commit canary releases the manifest points at. **Expect breakage on canary**; file issues with the full version string (e.g. `0.3.5-canary.a1b2c3d`) so we can pin which build broke.
 
 # Help wanted
 

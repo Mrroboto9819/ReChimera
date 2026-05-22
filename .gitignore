@@ -18,6 +18,7 @@ tmp_textures/
 tmp/
 tmp_*/
 *.tsbuildinfo
+temp.rs
 
 # Insomniac game data — copyrighted, never commit
 *.dat
