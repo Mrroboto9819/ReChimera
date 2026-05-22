@@ -293,10 +293,13 @@ jobs:
 
       - name: Prepare channel config
         # Patches tauri.conf.json (productName, identifier, version,
-        # updater endpoint) and the default brandColor in store.ts. For
-        # canary builds it also regenerates the bundled icon set from
-        # icon_canary.png. Runs on every matrix platform because each
-        # runner has its own working tree.
+        # updater endpoint), the default brandColor in store.ts, and
+        # regenerates the bundled icon set from the channel's source PNG.
+        # Icon regen runs for BOTH channels so the embedded binary icon
+        # always matches the canonical source PNG (icon.png for stable,
+        # icon_canary.png for canary) — no drift between committed
+        # src-tauri/icons/ and the source. Runs on every matrix platform
+        # because each runner has its own working tree.
         shell: bash
         working-directory: apps/desktop
         env:
@@ -334,22 +337,31 @@ jobs:
             fs.writeFileSync(p, next);
           '
 
-          if [ "$CHANNEL" = "canary" ]; then
-            # ICON_SOURCE is repo-rooted (apps/desktop/icon_canary.png);
-            # we cd'd into apps/desktop so resolve relative to repo root.
-            echo "Regenerating icon set from $ICON_SOURCE"
-            ICON_ABS="$GITHUB_WORKSPACE/$ICON_SOURCE"
-            if [ ! -f "$ICON_ABS" ]; then
-              echo "::error::Canary icon source not found at $ICON_ABS"
-              exit 1
-            fi
-            # bun tauri icon writes platform icons into src-tauri/icons/,
-            # preserving the filenames the bundle.icon array refers to.
-            bun tauri icon "$ICON_ABS"
+          # ICON_SOURCE is repo-rooted (apps/desktop/icon.png or
+          # apps/desktop/icon_canary.png). bun tauri icon writes platform
+          # icons into src-tauri/icons/, preserving the filenames the
+          # bundle.icon array in tauri.conf.json refers to (icon.ico for
+          # Windows resource, icon.icns for macOS bundle, 32x32 +
+          # 128x128 + 128x128@2x for Linux).
+          echo "Regenerating icon set for channel=$CHANNEL from $ICON_SOURCE"
+          ICON_ABS="$GITHUB_WORKSPACE/$ICON_SOURCE"
+          if [ ! -f "$ICON_ABS" ]; then
+            echo "::error::Icon source not found at $ICON_ABS"
+            exit 1
           fi
+          bun tauri icon "$ICON_ABS"
 
           echo "--- effective tauri.conf.json ---"
           jq '{productName, identifier, version, "updater.endpoints": .plugins.updater.endpoints}' src-tauri/tauri.conf.json
+          echo "--- src-tauri/icons/ after regen ---"
+          ls -la src-tauri/icons/ | head -20
+          echo "--- file sizes (sanity check that regen actually ran) ---"
+          for f in src-tauri/icons/icon.ico src-tauri/icons/icon.icns src-tauri/icons/128x128.png src-tauri/icons/32x32.png; do
+            if [ -f "$f" ]; then
+              size=$(wc -c < "$f")
+              echo "  $f  ($size bytes)"
+            fi
+          done
 
       - name: Build & upload to release
         id: tauri_build
