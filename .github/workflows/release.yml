@@ -441,7 +441,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Mirror latest.json to canary-latest
+      - name: Mirror latest.json to canary-latest (with URL rewrite)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -457,6 +457,19 @@ jobs:
             echo "::error::latest.json not found in $SRC_TAG — updater signing keys may be unset"
             exit 1
           fi
+
+          # tauri-action bakes URLs of the form
+          #   https://github.com/OWNER/REPO/releases/latest/download/<asset>
+          # into latest.json. That 'latest' is GitHub-magic: it resolves to
+          # the most recent NON-prerelease release, which is our stable
+          # `v$VERSION` tag. Stable bundles are named `ReChimera_*` (no
+          # "Canary"), so canary apps that fetch through the magic URL get
+          # a 404 every time. Rewrite the URLs to point directly at the
+          # per-commit canary release where the bundles actually live.
+          echo "Rewriting /releases/latest/download/ -> /releases/download/$SRC_TAG/ in manifest"
+          sed -i "s|/releases/latest/download/|/releases/download/$SRC_TAG/|g" /tmp/canary/latest.json
+          echo "--- rewritten latest.json (first platform block) ---"
+          jq '.platforms | to_entries | .[0]' /tmp/canary/latest.json
 
           # Ensure canary-latest release exists. First run creates it,
           # subsequent runs reuse and just --clobber the manifest asset.
