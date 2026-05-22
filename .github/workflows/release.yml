@@ -1,77 +1,155 @@
 name: release
 
+# Single workflow, two channels.
+#
+#   push to main      -> stable release (tag: v$VERSION)
+#   push to develop   -> canary release (tag: canary-v$VERSION-canary.<sha7>)
+#
+# The canary build path:
+#   - swaps icon_canary.png in as the icon source (regenerates the full set)
+#   - flips productName  to  "ReChimera Canary"
+#   - flips identifier   to  dev.rechimera.desktop.canary  so the two
+#     installs coexist on disk and each have their own settings store
+#   - retargets the auto-updater to a rolling `canary-latest` release
+#   - replaces the default brandColor (#FF6363 red -> #fcd202 yellow)
+#
+# Auto-update channels:
+#   stable apps poll  /releases/latest/download/latest.json
+#                     (GitHub's "latest" magic skips prereleases, so canary
+#                      builds never poison the stable channel)
+#   canary apps poll  /releases/download/canary-latest/latest.json
+#                     (a rolling alias release; each per-commit canary
+#                      release uploads its own latest.json and the final
+#                      job mirrors it onto canary-latest)
+
 on:
   push:
     branches:
       - main
-  # Manual trigger — useful for re-running a release after fixing a build
-  # error or kicking the workflow without a fresh commit on main.
+      - develop
   workflow_dispatch:
 
-# The Tauri app lives at apps/desktop with the package.json + tauri config.
-# The Cargo workspace root is the repo root (apps/desktop/src-tauri is a
-# workspace member), so target/ ends up at the repo root.
-
 jobs:
-  # Lightweight gate: read the version from apps/desktop/package.json and
-  # only proceed to the build matrix if a release for v{version} doesn't
-  # already exist. This means most pushes to main do nothing expensive —
-  # only a version bump triggers an actual cross-platform build.
-  check-version:
+  compute-mode:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.read.outputs.version }}
-      should_release: ${{ steps.check.outputs.should_release }}
+      channel: ${{ steps.compute.outputs.channel }}
+      version: ${{ steps.compute.outputs.version }}
+      base_version: ${{ steps.compute.outputs.base_version }}
+      tag: ${{ steps.compute.outputs.tag }}
+      release_name: ${{ steps.compute.outputs.release_name }}
+      product_name: ${{ steps.compute.outputs.product_name }}
+      identifier: ${{ steps.compute.outputs.identifier }}
+      prerelease: ${{ steps.compute.outputs.prerelease }}
+      updater_endpoint: ${{ steps.compute.outputs.updater_endpoint }}
+      brand_color: ${{ steps.compute.outputs.brand_color }}
+      icon_source: ${{ steps.compute.outputs.icon_source }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read version from apps/desktop/package.json
-        id: read
+      - name: Determine channel from branch
+        id: compute
+        env:
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
         run: |
-          VERSION=$(jq -r '.version' apps/desktop/package.json)
-          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
-            echo "::error::apps/desktop/package.json is missing a 'version' field"
+          set -euo pipefail
+          BASE_VERSION=$(jq -r '.version' apps/desktop/package.json)
+          if [ -z "$BASE_VERSION" ] || [ "$BASE_VERSION" = "null" ]; then
+            echo "::error::apps/desktop/package.json missing 'version' field"
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Detected version: $VERSION"
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          case "$REF" in
+            main)
+              CHANNEL=stable
+              VERSION="$BASE_VERSION"
+              TAG="v$VERSION"
+              RELEASE_NAME="v$VERSION"
+              PRODUCT_NAME="ReChimera"
+              IDENTIFIER="dev.rechimera.desktop"
+              PRERELEASE=false
+              UPDATER_ENDPOINT="https://github.com/$REPO/releases/latest/download/latest.json"
+              BRAND_COLOR="#FF6363"
+              ICON_SOURCE="apps/desktop/icon.png"
+              ;;
+            develop)
+              CHANNEL=canary
+              VERSION="${BASE_VERSION}-canary.${SHORT_SHA}"
+              TAG="canary-v$VERSION"
+              RELEASE_NAME="Canary v$VERSION"
+              PRODUCT_NAME="ReChimera Canary"
+              IDENTIFIER="dev.rechimera.desktop.canary"
+              PRERELEASE=true
+              UPDATER_ENDPOINT="https://github.com/$REPO/releases/download/canary-latest/latest.json"
+              BRAND_COLOR="#fcd202"
+              ICON_SOURCE="apps/desktop/icon_canary.png"
+              ;;
+            *)
+              echo "::error::Branch '$REF' is neither main nor develop — release workflow does not handle this ref."
+              exit 1
+              ;;
+          esac
+          {
+            echo "channel=$CHANNEL"
+            echo "version=$VERSION"
+            echo "base_version=$BASE_VERSION"
+            echo "tag=$TAG"
+            echo "release_name=$RELEASE_NAME"
+            echo "product_name=$PRODUCT_NAME"
+            echo "identifier=$IDENTIFIER"
+            echo "prerelease=$PRERELEASE"
+            echo "updater_endpoint=$UPDATER_ENDPOINT"
+            echo "brand_color=$BRAND_COLOR"
+            echo "icon_source=$ICON_SOURCE"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Build summary"
+            echo "- channel: \`$CHANNEL\`"
+            echo "- version: \`$VERSION\`"
+            echo "- tag: \`$TAG\`"
+            echo "- prerelease: \`$PRERELEASE\`"
+            echo "- updater endpoint: $UPDATER_ENDPOINT"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
+  # Single gate for both channels. Stable additionally runs sync-version
+  # --check so we catch out-of-sync Cargo/package/tauri version fields
+  # before burning a build matrix on them. Canary skips that check —
+  # canary writes its own version straight into tauri.conf.json at build
+  # time (see "Prepare channel config"), and we don't want a develop push
+  # to require a Cargo.toml bump.
+  gate:
+    needs: compute-mode
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.gate.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
         with:
           bun-version: latest
 
-      - name: Verify version is in sync across all sources
-        # Defers to scripts/sync-version.mjs in `--check` mode. If any
-        # of the three sources (Cargo.toml workspace, package.json,
-        # tauri.conf.json) disagree, the script exits non-zero and we
-        # fail the build with a clear "run sync-version" hint. This
-        # replaces the old hand-rolled grep+jq comparison and works
-        # because the same script is what developers run locally —
-        # `bun run version:bump 0.1.2` updates everything in one go,
-        # so CI just verifies they didn't forget.
+      - name: Stable — verify version sync across Cargo/package/tauri
+        if: needs.compute-mode.outputs.channel == 'stable'
         run: bun scripts/sync-version.mjs --check
 
-      - name: Check if release v${{ steps.read.outputs.version }} already exists
-        id: check
+      - name: Skip if a release with this tag already exists
+        id: gate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.read.outputs.version }}
+          TAG: ${{ needs.compute-mode.outputs.tag }}
         run: |
-          if gh release view "v$VERSION" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Release v$VERSION already exists — skipping build."
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release '$TAG' already exists — nothing to do."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Release v$VERSION does not exist — proceeding to build."
+            echo "Release '$TAG' does not exist — will build."
             echo "should_release=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # Pre-create a single draft release on the GitHub side BEFORE the matrix
-  # builds. Each matrix job then uploads to that release by ID, so they
-  # never race to create the same release.
   create-release:
-    needs: check-version
-    if: needs.check-version.outputs.should_release == 'true'
+    needs: [compute-mode, gate]
+    if: needs.gate.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -84,18 +162,17 @@ jobs:
         id: create
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.check-version.outputs.version }}
+          CHANNEL: ${{ needs.compute-mode.outputs.channel }}
+          VERSION: ${{ needs.compute-mode.outputs.version }}
+          TAG: ${{ needs.compute-mode.outputs.tag }}
+          RELEASE_NAME: ${{ needs.compute-mode.outputs.release_name }}
+          PRERELEASE: ${{ needs.compute-mode.outputs.prerelease }}
         run: |
-          # Build the release body. If RELEASE_NOTES.md exists at the repo
-          # root we use it verbatim — that file is hand-curated per release
-          # and contains the changelog, game-support table, and any help-
-          # wanted / acknowledgement sections for this push. If it's
-          # missing we fall back to a minimal auto-generated body so the
-          # workflow doesn't break on bare release tags.
-          if [ -f RELEASE_NOTES.md ]; then
+          set -euo pipefail
+          if [ "$CHANNEL" = "stable" ] && [ -f RELEASE_NOTES.md ]; then
             BODY=$(cat RELEASE_NOTES.md)
-            echo "Using RELEASE_NOTES.md ($(wc -l < RELEASE_NOTES.md) lines)"
-          else
+            echo "Stable: using RELEASE_NOTES.md ($(wc -l < RELEASE_NOTES.md) lines)"
+          elif [ "$CHANNEL" = "stable" ]; then
             BODY=$(cat <<EOF
           **ReChimera v$VERSION** — built from \`${{ github.sha }}\` on \`main\`.
 
@@ -111,29 +188,46 @@ jobs:
           extracted level folders.
           EOF
           )
-            echo "RELEASE_NOTES.md missing — used fallback template"
+            echo "Stable: RELEASE_NOTES.md missing — used fallback template"
+          else
+            BODY=$(cat <<EOF
+          **ReChimera Canary $VERSION**
+
+          Auto-built from commit \`${{ github.sha }}\` on the \`develop\` branch.
+          This is a pre-release — installs side-by-side with the stable
+          \`ReChimera\` app (different bundle identifier, different settings
+          store) and auto-updates from the rolling \`canary-latest\` channel.
+
+          - [Commit](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          - [Diff vs main](https://github.com/${{ github.repository }}/compare/main...${{ github.sha }})
+
+          **Expect breakage.** When filing issues against \`develop\`, paste
+          the full version string above so we can pin which canary build broke.
+          EOF
+          )
+            echo "Canary: generated release body for $TAG"
           fi
           RELEASE_ID=$(gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
             "/repos/${{ github.repository }}/releases" \
-            -f tag_name="v$VERSION" \
-            -f name="v$VERSION" \
+            -f tag_name="$TAG" \
+            -f name="$RELEASE_NAME" \
             -f body="$BODY" \
             -F draft=true \
-            -F prerelease=false \
+            -F prerelease=$PRERELEASE \
             -F target_commitish="${{ github.sha }}" \
             --jq '.id')
-          echo "Created draft release id=$RELEASE_ID"
+          echo "Created draft release id=$RELEASE_ID for tag=$TAG"
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: [check-version, create-release]
+    needs: [compute-mode, create-release]
     runs-on: ${{ matrix.platform }}
     strategy:
-      # Don't cancel the other platforms when one fails — partial uploads
-      # still land on the draft, and we get to see all platforms' errors
-      # in one workflow run.
+      # Don't cancel other platforms when one fails — partial uploads still
+      # land on the draft, and we get to see every platform's errors in one
+      # run. `publish-release` is gated on all four succeeding.
       fail-fast: false
       matrix:
         include:
@@ -163,8 +257,10 @@ jobs:
 
       - name: Cache Cargo registry & build
         # Cache the WORKSPACE target dir at the repo root, not
-        # apps/desktop/src-tauri/target — `apps/desktop/src-tauri` is
-        # a workspace member, so its target/ resolves to the root.
+        # apps/desktop/src-tauri/target — apps/desktop/src-tauri is a
+        # workspace member, so its target/ resolves to the root.
+        # Canary builds keep this cache hot because we never touch
+        # Cargo.toml — the version flip lives in tauri.conf.json only.
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
@@ -187,36 +283,86 @@ jobs:
         working-directory: apps/desktop
         run: bun install
 
+      - name: Prepare channel config
+        # Patches tauri.conf.json (productName, identifier, version,
+        # updater endpoint) and the default brandColor in store.ts. For
+        # canary builds it also regenerates the bundled icon set from
+        # icon_canary.png. Runs on every matrix platform because each
+        # runner has its own working tree.
+        shell: bash
+        working-directory: apps/desktop
+        env:
+          CHANNEL: ${{ needs.compute-mode.outputs.channel }}
+          VERSION: ${{ needs.compute-mode.outputs.version }}
+          PRODUCT_NAME: ${{ needs.compute-mode.outputs.product_name }}
+          IDENTIFIER: ${{ needs.compute-mode.outputs.identifier }}
+          UPDATER_ENDPOINT: ${{ needs.compute-mode.outputs.updater_endpoint }}
+          BRAND_COLOR: ${{ needs.compute-mode.outputs.brand_color }}
+          ICON_SOURCE: ${{ needs.compute-mode.outputs.icon_source }}
+        run: |
+          set -euo pipefail
+          echo "Patching src-tauri/tauri.conf.json for channel=$CHANNEL"
+          jq --arg n  "$PRODUCT_NAME" \
+             --arg id "$IDENTIFIER" \
+             --arg v  "$VERSION" \
+             --arg ep "$UPDATER_ENDPOINT" \
+             '.productName = $n
+              | .identifier = $id
+              | .version = $v
+              | .plugins.updater.endpoints = [$ep]' \
+             src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
+          mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
+
+          echo "Patching default brandColor in src/store.ts -> $BRAND_COLOR"
+          node -e '
+            const fs = require("fs");
+            const p = "src/store.ts";
+            const s = fs.readFileSync(p, "utf8");
+            const next = s.replace(/brandColor:\s*"#[0-9a-fA-F]{6}"/, `brandColor: "${process.env.BRAND_COLOR}"`);
+            if (next === s) {
+              console.error("::error::brandColor literal not found in src/store.ts — bailing");
+              process.exit(1);
+            }
+            fs.writeFileSync(p, next);
+          '
+
+          if [ "$CHANNEL" = "canary" ]; then
+            # ICON_SOURCE is repo-rooted (apps/desktop/icon_canary.png);
+            # we cd'd into apps/desktop so resolve relative to repo root.
+            echo "Regenerating icon set from $ICON_SOURCE"
+            ICON_ABS="$GITHUB_WORKSPACE/$ICON_SOURCE"
+            if [ ! -f "$ICON_ABS" ]; then
+              echo "::error::Canary icon source not found at $ICON_ABS"
+              exit 1
+            fi
+            # bun tauri icon writes platform icons into src-tauri/icons/,
+            # preserving the filenames the bundle.icon array refers to.
+            bun tauri icon "$ICON_ABS"
+          fi
+
+          echo "--- effective tauri.conf.json ---"
+          jq '{productName, identifier, version, "updater.endpoints": .plugins.updater.endpoints}' src-tauri/tauri.conf.json
+
       - name: Build & upload to release
         id: tauri_build
         uses: tauri-apps/tauri-action@v0.6.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Updater signing — leave the secrets unset and the action
-          # builds unsigned bundles (fine for a Beta release). Generate
-          # keys with `tauri signer generate` and add to repo secrets
-          # to enable auto-updates later.
+          # Updater signing — same key for both channels. Signatures verify
+          # in both apps; the channel split comes from the bundle identifier
+          # and the updater endpoint, not from key separation.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          # Where the package.json + tauri config live. Without this,
-          # tauri-action assumes the repo root and fails to find the
-          # config.
           projectPath: apps/desktop
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          # Emits `latest.json` alongside the bundles for Tauri's
-          # built-in updater. Harmless even when signing keys aren't
-          # set yet — the file is just a manifest.
+          # Emits `latest.json` alongside the bundles for Tauri's built-in
+          # updater. Required for the auto-update flow.
           includeUpdaterJson: true
           args: ${{ matrix.args }}
 
-  # Once every matrix job has uploaded its bundles, flip the draft to a
-  # real published release. If any build failed, the release stays as a
-  # draft so we don't ship a half-built version. (`fail-fast: false`
-  # above ensures every matrix job runs; this gate then requires ALL of
-  # them to have succeeded before publishing.)
   publish-release:
-    needs: [check-version, create-release, build]
+    needs: [compute-mode, create-release, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -231,36 +377,89 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "/repos/${{ github.repository }}/releases/$RELEASE_ID" \
             -F draft=false
-          echo "Release v${{ needs.check-version.outputs.version }} published."
+          echo "Release ${{ needs.compute-mode.outputs.tag }} published."
 
-      # Final Discord notification once the release flips from draft to
-      # published. Only runs if all matrix builds succeeded (this job's
-      # `needs: build` enforces that).
       - name: Notify Discord (release published)
         if: env.DISCORD_WEBHOOK_URL != ''
         shell: bash
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          VERSION: ${{ needs.check-version.outputs.version }}
-          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.check-version.outputs.version }}
+          CHANNEL: ${{ needs.compute-mode.outputs.channel }}
+          VERSION: ${{ needs.compute-mode.outputs.version }}
+          TAG: ${{ needs.compute-mode.outputs.tag }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ needs.compute-mode.outputs.tag }}
         run: |
+          if [ "$CHANNEL" = "canary" ]; then
+            TITLE="🐤 ReChimera Canary $VERSION published"
+            DESC="Auto-built from develop. Side-by-side install; canary apps auto-update from canary-latest."
+            COLOR=16566834
+          else
+            TITLE="🚀 ReChimera v$VERSION released"
+            DESC="All platform bundles built and the release is now public. Click through for installers."
+            COLOR=3447003
+          fi
           PAYLOAD=$(jq -n \
-            --arg title "🚀 ReChimera v$VERSION released" \
-            --arg desc "All platform bundles built and the release is now public. Click through for installers." \
+            --arg title "$TITLE" \
+            --arg desc "$DESC" \
             --arg url "$RELEASE_URL" \
-            '{embeds: [{title: $title, description: $desc, url: $url, color: 3447003}]}')
+            --argjson color "$COLOR" \
+            '{embeds: [{title: $title, description: $desc, url: $url, color: $color}]}')
           curl -sS -X POST \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD" \
             "$DISCORD_WEBHOOK_URL" || echo "Discord notify failed (non-blocking)"
 
-  # If any matrix build fails, `publish-release` is gated off and we'd
-  # otherwise hear nothing. This job runs on the build-job result and
-  # only fires the failure ping when at least one matrix entry didn't
-  # succeed. Single notification, end of run, never overlaps with the
-  # success ping above.
+  # Canary-only: mirror this build's latest.json onto the rolling
+  # `canary-latest` release. The canary app's auto-updater hits a fixed
+  # URL (releases/download/canary-latest/latest.json), and that file's
+  # asset URLs point back into the per-commit release where the bundles
+  # actually live — so we never re-upload the bundles, just the manifest.
+  alias-canary-latest:
+    needs: [compute-mode, create-release, build, publish-release]
+    if: needs.compute-mode.outputs.channel == 'canary'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Mirror latest.json to canary-latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SRC_TAG: ${{ needs.compute-mode.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/canary
+          gh release download "$SRC_TAG" \
+            --repo "$REPO" \
+            --pattern 'latest.json' \
+            --dir /tmp/canary
+          if [ ! -f /tmp/canary/latest.json ]; then
+            echo "::error::latest.json not found in $SRC_TAG — updater signing keys may be unset"
+            exit 1
+          fi
+
+          # Ensure canary-latest release exists. First run creates it,
+          # subsequent runs reuse and just --clobber the manifest asset.
+          if ! gh release view canary-latest --repo "$REPO" >/dev/null 2>&1; then
+            echo "Creating rolling canary-latest release"
+            gh release create canary-latest \
+              --repo "$REPO" \
+              --title "Canary (latest)" \
+              --notes "Rolling alias for the canary auto-updater. The fixed URL https://github.com/$REPO/releases/download/canary-latest/latest.json is what the ReChimera Canary app polls; the manifest it returns points at the most recent per-commit canary release. Do not download bundles from here — they are not attached." \
+              --prerelease \
+              --target "${{ github.sha }}"
+          fi
+
+          gh release upload canary-latest /tmp/canary/latest.json \
+            --repo "$REPO" \
+            --clobber
+          echo "canary-latest manifest now points at $SRC_TAG"
+
+  # If any matrix build fails, publish-release is gated off. This job
+  # runs on the build job's result and only fires the failure ping when
+  # at least one matrix entry didn't succeed.
   notify-build-failure:
-    needs: [check-version, build]
+    needs: [compute-mode, build]
     if: failure() || cancelled()
     runs-on: ubuntu-latest
     steps:
@@ -269,11 +468,18 @@ jobs:
         shell: bash
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          VERSION: ${{ needs.check-version.outputs.version }}
+          CHANNEL: ${{ needs.compute-mode.outputs.channel }}
+          VERSION: ${{ needs.compute-mode.outputs.version }}
+          TAG: ${{ needs.compute-mode.outputs.tag }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if [ "$CHANNEL" = "canary" ]; then
+            TITLE="❌ ReChimera Canary $VERSION — build failed"
+          else
+            TITLE="❌ ReChimera v$VERSION — build failed"
+          fi
           PAYLOAD=$(jq -n \
-            --arg title "❌ ReChimera v$VERSION — build failed" \
+            --arg title "$TITLE" \
             --arg desc "One or more platforms failed to build. Click through for the workflow log." \
             --arg url "$RUN_URL" \
             '{embeds: [{title: $title, description: $desc, url: $url, color: 15548997}]}')

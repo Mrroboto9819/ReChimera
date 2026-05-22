@@ -38,16 +38,13 @@ import type {
 } from "../api";
 import {
   decodeMeshGeom,
-  exportLevelFbx,
   exportLevelGlb,
   fetchAnimsetClip,
   readCachedBytes,
   type LevelGlbExportEvent,
 } from "../api";
 import { buildAnimationClipFromDecoded, buildSkinnedAsset } from "../skinning";
-import { ExportFormatPicker } from "../components/ExportFormatPicker";
 import { FpsOverlay, FpsSampler } from "../components/FpsOverlay";
-import type { ExportFormat } from "../store";
 import type { LoadPhaseState } from "../components/LoadProgress";
 import { clickMods, type useSelection } from "../selection";
 import { resolvedTransform, type InstanceEdit, type useEdits } from "../edits";
@@ -2344,16 +2341,14 @@ export function Viewport({
     return () => document.removeEventListener("mousedown", close);
   }, [viewMenuOpen]);
 
-  const handleExportMap = useCallback(async (format: ExportFormat = "glb") => {
+  const handleExportMap = useCallback(async () => {
     if (!levelFolder || mapExportPhase) return;
-    const ext = format === "fbx" ? "fbx" : "glb";
-    const filterName = format === "fbx" ? "Autodesk FBX (ASCII)" : "glTF binary";
     let outPath: string | null = null;
     try {
       outPath = (await saveDialog({
-        title: `Export full map to ${ext.toUpperCase()}`,
-        defaultPath: `level.${ext}`,
-        filters: [{ name: filterName, extensions: [ext] }],
+        title: "Export full map to GLB",
+        defaultPath: "level.glb",
+        filters: [{ name: "glTF binary", extensions: ["glb"] }],
       })) as string | null;
     } catch (err) {
       setMapExportError(String(err));
@@ -2396,11 +2391,7 @@ export function Viewport({
     };
 
     try {
-      if (format === "fbx") {
-        await exportLevelFbx(levelFolder, outPath, channel);
-      } else {
-        await exportLevelGlb(levelFolder, outPath, channel);
-      }
+      await exportLevelGlb(levelFolder, outPath, channel);
     } catch (err) {
       setMapExportPhase(null);
       setMapExportError(String(err));
@@ -2712,12 +2703,15 @@ export function Viewport({
             />
           </button>
         ) : (
-          <ExportFormatPicker
-            onExport={(fmt) => void handleExportMap(fmt)}
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void handleExportMap()}
             disabled={!levelFolder}
-            label={(fmt) => (fmt === "fbx" ? "Export map .fbx" : "Export map .glb")}
-            placement="below"
-          />
+          >
+            <Download size={14} strokeWidth={2} />
+            Export map .glb
+          </button>
         )}
       </div>
       <div className="viewport-canvas-wrap">

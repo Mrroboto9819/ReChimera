@@ -6,11 +6,9 @@ import {
   type ClipPick,
   type GlbExportOptions,
   exportCachedMobyGlb,
-  exportMobyFbxWithOptions,
   exportMobyGlbWithOptions,
   listAnimsets,
 } from "../api";
-import type { ExportFormat } from "../store";
 
 interface ExportOptionsModalProps {
   open: boolean;
@@ -20,7 +18,6 @@ interface ExportOptionsModalProps {
   hasSkeleton: boolean;
   primaryAnimsetHash: string | null;
   initialExtraPicks?: Record<string, number[]>;
-  format?: ExportFormat;
   onClose: () => void;
   onExported?: (path: string, bytes: number) => void;
 }
@@ -42,11 +39,9 @@ export function ExportOptionsModal({
   // initialExtraPicks intentionally unused — animations always start
   // unselected, see the listAnimsets effect below.
   initialExtraPicks: _initialExtraPicks,
-  format = "glb",
   onClose,
   onExported,
 }: ExportOptionsModalProps) {
-  const isFbx = format === "fbx";
   const [step, setStep] = useState<StepId>("scope");
   const [includeMesh, setIncludeMesh] = useState(true);
   const [includeMaterials, setIncludeMaterials] = useState(true);
@@ -132,15 +127,12 @@ export function ExportOptionsModal({
 
   const runExport = async () => {
     setSavingError(null);
-    const ext = isFbx ? "fbx" : "glb";
-    const filterName = isFbx ? "Autodesk FBX (ASCII)" : "Binary glTF";
-    const dialogTitle = isFbx ? "Export .fbx" : "Export .glb";
     let path: string | null = null;
     try {
       path = await saveDialog({
-        defaultPath: `${assetName.replace(/[\\/:"*?<>|]/g, "_") || assetTuidHex}.${ext}`,
-        filters: [{ name: filterName, extensions: [ext] }],
-        title: dialogTitle,
+        defaultPath: `${assetName.replace(/[\\/:"*?<>|]/g, "_") || assetTuidHex}.glb`,
+        filters: [{ name: "Binary glTF", extensions: ["glb"] }],
+        title: "Export .glb",
       });
     } catch (e) {
       setSavingError(`Save dialog failed: ${e}`);
@@ -173,7 +165,6 @@ export function ExportOptionsModal({
 
     setStep("saving");
     const canCopyCached =
-      !isFbx &&
       extra_clips.length === 0 &&
       includeMesh &&
       includeMaterials &&
@@ -182,10 +173,7 @@ export function ExportOptionsModal({
 
     try {
       let bytes: number;
-      if (isFbx) {
-        setSavingStatus("Building FBX (mesh + materials + textures)…");
-        bytes = await exportMobyFbxWithOptions(folder, assetTuidHex, path, options);
-      } else if (canCopyCached) {
+      if (canCopyCached) {
         setSavingStatus("Copying cached GLB…");
         bytes = await exportCachedMobyGlb(folder, assetTuidHex, path);
       } else {
@@ -206,7 +194,7 @@ export function ExportOptionsModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={isFbx ? "Export FBX (beta)" : "Export GLB"}
+      title="Export GLB"
       subtitle={
         <span className="mono small dim">
           {assetName || assetTuidHex} · step {stepLabel}
@@ -254,18 +242,8 @@ export function ExportOptionsModal({
     >
       {step === "scope" && (
         <div className="export-step">
-          {isFbx && (
-            <p className="warn-text small">
-              FBX export (beta, binary 7.4) writes mesh + materials + embedded
-              textures + skinning + animation. Imports into Blender's modern
-              FBX importer, Unreal, Maya. Rotation curves are baked from
-              quaternions to Euler XYZ; very fast spins may interpolate along
-              the short path. If a rig imports oddly, please share which app
-              and which moby and we'll iterate.
-            </p>
-          )}
           <p className="dim small">
-            What should the {isFbx ? "FBX" : "GLB"} contain?
+            What should the GLB contain?
           </p>
           <label className="export-toggle">
             <input

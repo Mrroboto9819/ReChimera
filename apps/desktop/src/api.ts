@@ -266,19 +266,6 @@ export const exportMobyGlbWithOptions = (
     options,
   });
 
-export const exportMobyFbxWithOptions = (
-  levelFolder: string,
-  assetTuidHex: string,
-  outPath: string,
-  options: GlbExportOptions,
-) =>
-  invoke<number>("export_moby_fbx_with_options", {
-    levelFolder,
-    assetTuidHex,
-    outPath,
-    options,
-  });
-
 export const writeBytes = (path: string, bytes: number[]) =>
   invoke<void>("write_bytes", { path, bytes });
 
@@ -341,17 +328,6 @@ export const exportLevelGlb = (
   onEvent: Channel<LevelGlbExportEvent>,
 ) =>
   invoke<void>("export_level_glb", {
-    levelFolder,
-    outPath,
-    onEvent,
-  });
-
-export const exportLevelFbx = (
-  levelFolder: string,
-  outPath: string,
-  onEvent: Channel<LevelGlbExportEvent>,
-) =>
-  invoke<void>("export_level_fbx", {
     levelFolder,
     outPath,
     onEvent,

@@ -12,7 +12,8 @@
     "tauri:build": "tauri build",
     "version:bump": "bun ../../scripts/bump-version.mjs",
     "version:sync": "bun ../../scripts/sync-version.mjs",
-    "version:check": "bun ../../scripts/sync-version.mjs --check"
+    "version:check": "bun ../../scripts/sync-version.mjs --check",
+    "version:canary": "bun ../../scripts/sync-version.mjs --canary"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.3",

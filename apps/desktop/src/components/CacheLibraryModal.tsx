@@ -37,9 +37,7 @@ import {
   type TextureBlobMap,
 } from "../api";
 import { AssetPreview } from "../views/AssetPreview";
-import { ExportFormatPicker } from "./ExportFormatPicker";
 import { ExportOptionsModal } from "./ExportOptionsModal";
-import type { ExportFormat } from "../store";
 import type { ExportPicks } from "../views/GlbPreview";
 import { Modal } from "./Modal";
 import { SoundPlayer, type NowPlaying } from "./SoundPlayer";
@@ -919,7 +917,6 @@ export function CacheLibraryModal({
 
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
-  const [exportFormat, setExportFormat] = useState<ExportFormat>("glb");
   const [previewPicks, setPreviewPicks] = useState<ExportPicks>({ byAnimset: {} });
 
   useEffect(() => {
@@ -954,10 +951,9 @@ export function CacheLibraryModal({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [open, exportModalOpen, moveSelection]);
-  const handleExport = (format: ExportFormat = "glb") => {
+  const handleExport = () => {
     if (!selectedAsset || exporting || !folder) return;
     setExportStatus(null);
-    setExportFormat(format);
     setExportModalOpen(true);
   };
 
@@ -1109,11 +1105,15 @@ export function CacheLibraryModal({
                 {bulkBusy ? "Exporting…" : `Export ${assetMulti.size} GLBs`}
               </Button>
             ) : (
-              <ExportFormatPicker
-                onExport={(format) => handleExport(format)}
+              <Button
+                variant="primary"
+                icon={Download}
+                onClick={() => handleExport()}
                 disabled={!selectedAsset}
                 loading={exporting}
-              />
+              >
+                {exporting ? "Exporting…" : "Export .glb"}
+              </Button>
             ))}
           {filter === "texture" &&
             (textureMulti.size > 1 ? (
@@ -1783,7 +1783,6 @@ export function CacheLibraryModal({
           hasSkeleton={selectedAsset.skeleton != null}
           primaryAnimsetHash={selectedAsset.animset_hash ?? null}
           initialExtraPicks={previewPicks.byAnimset}
-          format={exportFormat}
           onClose={() => setExportModalOpen(false)}
           onExported={(path, bytes) => {
             setExportStatus(`Exported ${bytes.toLocaleString()} bytes → ${path}`);
