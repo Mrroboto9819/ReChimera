@@ -13,12 +13,14 @@
  *                 mirroring what .github/workflows/release.yml does for
  *                 pushes to the develop branch. Specifically:
  *
- *                   - Computes a canary version `${base}-canary.${suffix}`
- *                     where `base` is the Cargo.toml version and `suffix`
- *                     defaults to `git rev-list --count HEAD` (a monotonic
- *                     integer — the MSI bundler requires the pre-release
- *                     identifier to be numeric and <= 65535, which rules
- *                     out hex SHAs).
+ *                   - Computes a canary version `${base}-${suffix}` where
+ *                     `base` is the Cargo.toml version and `suffix` defaults
+ *                     to `git rev-list --count HEAD` (a monotonic integer).
+ *                     The MSI bundler requires the SemVer pre-release portion
+ *                     to be a single numeric value <= 65535 — no words, no
+ *                     dots — so the "canary" identity is conveyed by the
+ *                     productName / identifier / brand color / icon patches
+ *                     below, not by the version string itself.
  *                   - Patches apps/desktop/src-tauri/tauri.conf.json:
  *                       version, productName, identifier, updater endpoint.
  *                     Does NOT touch Cargo.toml or package.json (matches CI,
@@ -141,7 +143,11 @@ function runCanary() {
 
   const baseVersion = readCargoVersion();
   const suffix = resolveSuffix();
-  const canaryVersion = `${baseVersion}-canary.${suffix}`;
+  // MSI bundler requires the pre-release identifier to be a single numeric
+  // value <= 65535 — no words, no dots. So the version stays `base-<n>`
+  // (the "canary" identity is conveyed by productName / identifier / icon
+  // / brand color patched below, not by the version string itself).
+  const canaryVersion = `${baseVersion}-${suffix}`;
 
   console.log(`[sync-version] canary mode`);
   console.log(`[sync-version]   base version : ${baseVersion}  (Cargo.toml)`);
