@@ -488,6 +488,7 @@ export function GlbPreview({
           ariaLabel="Animation"
           className="glb-preview-select"
           options={clipOptions}
+          searchable
         />
         <button
           type="button"

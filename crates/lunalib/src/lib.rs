@@ -40,6 +40,7 @@ pub mod skeleton;
 pub mod sound;
 pub mod stream;
 pub mod texture;
+pub mod texture_global;
 pub mod texture_old;
 pub mod texture_rfom;
 pub mod tie;

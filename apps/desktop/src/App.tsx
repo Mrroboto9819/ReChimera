@@ -1747,22 +1747,24 @@ export function App() {
                 [
                   "mobys",
                   "ties",
-                  "materials",
-                  "normalmaps",
                   "textures",
+                  "normalmaps",
+                  "materials",
                   "animations",
                 ] as const
               ).map((p) => {
-                // Backend emits real progress for mobys/ties/materials/
-                // normalmaps/textures. "animations" is cosmetic — anims are
-                // decoded inline during the mobys phase, so it flips done as
-                // soon as we've moved past mobys.
+                // Backend emits real progress for mobys/ties/textures/
+                // normalmaps/materials. The texture sub-phases run in
+                // EMISSIONS → NORMALS → ALBEDOS order so albedo (the
+                // visible-look channel) lands last. "animations" is
+                // cosmetic — anims are decoded inline during the mobys
+                // phase, so it flips done as soon as we've moved past mobys.
                 const realOrder = [
                   "mobys",
                   "ties",
-                  "materials",
-                  "normalmaps",
                   "textures",
+                  "normalmaps",
+                  "materials",
                 ];
                 const realIdx = realOrder.indexOf(cacheProgress.phase);
                 const cosmetic = p === "animations";

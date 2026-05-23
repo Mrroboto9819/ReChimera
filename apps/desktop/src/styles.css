@@ -5303,6 +5303,19 @@ textarea {
   font-size: 10px;
   flex: 0 0 auto;
 }
+/* Wrapper that owns the search input + scrollable option list when the
+   Select is in `searchable` mode. The wrapper is fixed-positioned by the
+   component; the inner list keeps the scrolling. */
+.select-popover-wrap {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  z-index: 1000;
+}
 .select-popover {
   list-style: none;
   margin: 0;
@@ -5315,6 +5328,54 @@ textarea {
   z-index: 1000;
   font-family: var(--font-mono);
   font-size: 12px;
+}
+/* When wrapped (searchable mode), let the list participate in the
+   wrapper's flex column and lose its own border/shadow so the search
+   input + list read as a single surface. */
+.select-popover-wrap .select-popover {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.select-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  flex: 0 0 auto;
+}
+.select-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.select-search-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  background: rgba(255, 255, 255, 0.06);
+}
+.select-search-clear {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+.select-search-clear:hover {
+  color: var(--text-1);
 }
 .select-option {
   display: flex;

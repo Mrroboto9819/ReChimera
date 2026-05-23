@@ -76,7 +76,18 @@ impl TexFormat {
             0x87 => TexFormat::Dxt3,
             0x88 => TexFormat::Dxt5,
             0x8B => TexFormat::Rg8,
+            // Linear-tiled compressed block variants — symmetric to the
+            // Morton-tiled 0x86/0x87/0x88 trio. 0xA6 (BC1_LN) is documented
+            // in IT; 0xA7 (BC2_LN) and 0xA8 (BC3_LN) are the obvious
+            // siblings, observed in R2's `packed/game/global_*` PSARC
+            // texture headers where weapon / shared-character textures are
+            // stored. We decode all three with `texpresso` using the same
+            // Bc1/Bc2/Bc3 codecs — the linear vs swizzled difference is in
+            // texel addressing, not block content, and our `decode_dxt`
+            // path already treats the input as a linear block stream.
             0xA6 => TexFormat::Bc1Linear,
+            0xA7 => TexFormat::Dxt3,
+            0xA8 => TexFormat::Dxt5,
 
             other => TexFormat::Unknown(other),
         }
