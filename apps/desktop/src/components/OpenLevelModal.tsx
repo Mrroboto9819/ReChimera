@@ -55,7 +55,7 @@ const GAMES: GameSpec[] = [
     franchise: "resistance",
     supported: true,
     logoSrc: "/RFOM.webp",
-    byline: "Full pipeline: meshes, textures, skeletons, animations, ufrags, ties, foliage, shrubs, details, skybox dome, sounds, visemes.",
+    byline: "Full pipeline: meshes, textures, skeletons, animations, ufrags, ties, foliage, shrubs, details, cubemap, sounds, visemes.",
     entryFile: "ps3levelmain.dat",
     hint: "RFOM ships `game.psarc` archives — extract them first with PSARC tooling so you get the loose file tree (e.g. `extract_psarc.cmd` from the InsomniaToolset bundle, or any PSARC unpacker). Once unpacked, levels live in `<game>/PS3_GAME/USRDIR/packed/levels/<levelN>/`. Pick a folder that contains `ps3levelmain.dat` plus its siblings (`ps3leveltexs.dat`, `ps3levelverts.dat`, `ps3levelcoll.dat`, …). Note: some level folders (e.g. `level22`) only ship dialogue/sound and are NOT playable on their own.",
     capabilities: {
@@ -106,7 +106,7 @@ const GAMES: GameSpec[] = [
     franchise: "ratchet_clank",
     supported: true,
     logoSrc: "/R&C_FTD.webp",
-    byline: "Meshes, textures, materials, skeletons, ufrags and tie instances load. Animations export in T-pose (complex frame format unsolved). No skybox — no IT/ReLunacy reference.",
+    byline: "Meshes, textures, materials, skeletons, ufrags and tie instances load. Animations export in T-pose (complex frame format unsolved). No cubemap — no IT/ReLunacy reference.",
     entryFile: "main.dat",
     hint: "ToD levels are TOD layout — main.dat embeds asset tables, with vertices.dat / textures.dat / texstream.dat / system.tp / system.tph as siblings. There is no assetlookup.dat.",
     capabilities: {

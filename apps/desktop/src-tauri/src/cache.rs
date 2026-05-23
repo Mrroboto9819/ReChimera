@@ -95,6 +95,7 @@ pub enum CacheEvent {
     Item {
         kind: &'static str,
         name: String,
+        file: String,
     },
 
     Progress {
@@ -918,13 +919,14 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                     kind: "moby".into(),
                     tuid: dto.asset_tuid.clone(),
                     name: dto.name.clone(),
-                    file: file_rel,
+                    file: file_rel.clone(),
                     size_bytes,
                 });
             }
             let _ = on_event.send(CacheEvent::Item {
                 kind: "moby",
                 name: dto.name,
+                file: file_rel,
             });
             let _ = on_event.send(CacheEvent::Progress { current: tod_count });
         },
@@ -995,13 +997,14 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                     kind: "moby".into(),
                     tuid: dto.asset_tuid.clone(),
                     name: dto.name.clone(),
-                    file: file_rel,
+                    file: file_rel.clone(),
                     size_bytes,
                 });
             }
             let _ = on_event.send(CacheEvent::Item {
                 kind: "moby",
                 name: dto.name,
+                file: file_rel,
             });
             let _ = on_event.send(CacheEvent::Progress { current: rfom_count });
         },
@@ -1010,6 +1013,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
         }
         eprintln!("[cache] RFOM layout: extracted {rfom_count} mobys");
     } else {
+        let mut emitted_moby_tuids: Vec<u64> = Vec::new();
         read_moby_assets_with_total(
             level_path,
             None,
@@ -1020,6 +1024,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                         return;
                     }
                 }
+                emitted_moby_tuids.push(asset.tuid);
                 moby_assets_for_glb.push(asset.clone());
 
                 let mut submeshes = Vec::new();
@@ -1061,7 +1066,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                         kind: "moby".into(),
                         tuid: dto.asset_tuid.clone(),
                         name: dto.name.clone(),
-                        file: file_rel,
+                        file: file_rel.clone(),
                         size_bytes,
                     });
                 }
@@ -1069,11 +1074,25 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                 let _ = on_event.send(CacheEvent::Item {
                     kind: "moby",
                     name: dto.name,
+                    file: file_rel,
                 });
                 let _ = on_event.send(CacheEvent::Progress { current: moby_done });
             },
         )
         .map_err(|e| e.to_string())?;
+
+        if std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
+            let sample_moby_tuids: Vec<String> = emitted_moby_tuids
+                .iter()
+                .take(10)
+                .map(|t| format!("0x{:016X}", t))
+                .collect();
+            eprintln!(
+                "[v2-match] V2 extracted {} mobys; first 10 tuids: {:?}",
+                emitted_moby_tuids.len(),
+                sample_moby_tuids
+            );
+        }
     }
 
     eprintln!("[cache] -> phase ties (layout={})", layout.tag());
@@ -1132,7 +1151,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                     kind: "tie".into(),
                     tuid: dto.asset_tuid.clone(),
                     name: dto.name.clone(),
-                    file: file_rel,
+                    file: file_rel.clone(),
                     size_bytes,
                 });
             }
@@ -1140,6 +1159,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
             let _ = on_event.send(CacheEvent::Item {
                 kind: "tie",
                 name: dto.name,
+                file: file_rel,
             });
             let _ = on_event.send(CacheEvent::Progress { current: tie_done });
         },
@@ -1199,7 +1219,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                     kind: "tie".into(),
                     tuid: dto.asset_tuid.clone(),
                     name: dto.name.clone(),
-                    file: file_rel,
+                    file: file_rel.clone(),
                     size_bytes,
                 });
             }
@@ -1207,6 +1227,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
             let _ = on_event.send(CacheEvent::Item {
                 kind: "tie",
                 name: dto.name,
+                file: file_rel,
             });
             let _ = on_event.send(CacheEvent::Progress { current: tie_done });
         },
@@ -1269,7 +1290,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                             kind: "detail".into(),
                             tuid: dto.asset_tuid.clone(),
                             name: dto.name.clone(),
-                            file: file_rel,
+                            file: file_rel.clone(),
                             size_bytes,
                         });
                     }
@@ -1277,6 +1298,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                     let _ = on_event.send(CacheEvent::Item {
                         kind: "tie",
                         name: dto.name,
+                        file: file_rel,
                     });
                 }
                 eprintln!("[cache] RFOM layout: extracted {detail_done} detail clusters");
@@ -1334,7 +1356,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                             kind: "shrub".into(),
                             tuid: dto.asset_tuid.clone(),
                             name: dto.name.clone(),
-                            file: file_rel,
+                            file: file_rel.clone(),
                             size_bytes,
                         });
                     }
@@ -1342,6 +1364,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                     let _ = on_event.send(CacheEvent::Item {
                         kind: "tie",
                         name: dto.name,
+                        file: file_rel,
                     });
                 }
                 eprintln!("[cache] RFOM layout: extracted {shrub_done} shrub meshes");
@@ -1400,7 +1423,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                             kind: "foliage".into(),
                             tuid: dto.asset_tuid.clone(),
                             name: dto.name.clone(),
-                            file: file_rel,
+                            file: file_rel.clone(),
                             size_bytes,
                         });
                     }
@@ -1408,6 +1431,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                     let _ = on_event.send(CacheEvent::Item {
                         kind: "tie",
                         name: dto.name,
+                        file: file_rel,
                     });
                 }
                 eprintln!("[cache] RFOM layout: extracted {foliage_done} foliage meshes");
@@ -1566,7 +1590,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                     kind: "tie".into(),
                     tuid: dto.asset_tuid.clone(),
                     name: dto.name.clone(),
-                    file: file_rel,
+                    file: file_rel.clone(),
                     size_bytes,
                 });
             }
@@ -1574,6 +1598,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
             let _ = on_event.send(CacheEvent::Item {
                 kind: "tie",
                 name: dto.name,
+                file: file_rel,
             });
             let _ = on_event.send(CacheEvent::Progress { current: tie_done });
         },
@@ -1678,12 +1703,91 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
             entries.push(CacheManifestEntry {
                 kind: "ufrag".into(),
                 tuid: dto.tuid,
-                name: dto.zone_tuid,
-                file: file_rel,
+                name: dto.zone_tuid.clone(),
+                file: file_rel.clone(),
                 size_bytes,
             });
             ufrag_done += 1;
+            let _ = on_event.send(CacheEvent::Item {
+                kind: "ufrag",
+                name: dto.zone_tuid,
+                file: file_rel,
+            });
             let _ = on_event.send(CacheEvent::Progress { current: ufrag_done });
+        }
+    }
+
+    // Cubemap extraction (V2 only). Reads cubemaps.dat per the
+    // ResourceCubemap (0x1D200) entries in assetlookup.dat, decodes
+    // 6 faces × base mip → 6 PNGs per cubemap, emits a small JSON
+    // descriptor so the viewport can wire them into a CubeTexture.
+    if matches!(layout, LevelLayout::V2) {
+        let cubemaps = lunalib::read_cubemaps(level_path).unwrap_or_default();
+        if !cubemaps.is_empty() {
+            let cube_dir = root.join("cubemaps");
+            fs::create_dir_all(&cube_dir)
+                .map_err(|e| format!("create cubemaps dir: {e}"))?;
+            for cm in cubemaps {
+                let hash_hex = format!("{:016X}", cm.hash);
+                let sub = cube_dir.join(&hash_hex);
+                fs::create_dir_all(&sub)
+                    .map_err(|e| format!("create cubemap subdir: {e}"))?;
+                let mut face_paths: Vec<String> = Vec::with_capacity(6);
+                for (i, face) in cm.faces.iter().enumerate() {
+                    if face.rgba.is_empty() {
+                        continue;
+                    }
+                    let png = lunalib::texture::encode_png(
+                        &face.rgba,
+                        face.width,
+                        face.height,
+                    );
+                    if png.is_empty() {
+                        continue;
+                    }
+                    let rel = format!("cubemaps/{}/face_{}.png", hash_hex, i);
+                    let path = root.join(&rel);
+                    if fs::write(&path, &png).is_err() {
+                        continue;
+                    }
+                    face_paths.push(rel);
+                }
+                if face_paths.len() != 6 {
+                    eprintln!(
+                        "[cubemap] 0x{}: emitted {} faces; skipping descriptor",
+                        hash_hex,
+                        face_paths.len()
+                    );
+                    continue;
+                }
+                let dto = serde_json::json!({
+                    "tuid": format!("0x{}", hash_hex),
+                    "width": cm.width,
+                    "height": cm.height,
+                    "faces": face_paths,
+                });
+                let file_rel = format!("cubemaps/{}.json", hash_hex);
+                let path = root.join(&file_rel);
+                let json_bytes = match serde_json::to_vec(&dto) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                if fs::write(&path, &json_bytes).is_err() {
+                    continue;
+                }
+                entries.push(CacheManifestEntry {
+                    kind: "cubemap".into(),
+                    tuid: format!("0x{}", hash_hex),
+                    name: String::new(),
+                    file: file_rel.clone(),
+                    size_bytes: json_bytes.len() as u64,
+                });
+                let _ = on_event.send(CacheEvent::Item {
+                    kind: "cubemap",
+                    name: format!("0x{}", hash_hex),
+                    file: file_rel,
+                });
+            }
         }
     }
 
@@ -1834,7 +1938,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                         kind: "texture".into(),
                         tuid: id.to_string(),
                         name: String::new(),
-                        file: file_rel,
+                        file: file_rel.clone(),
                         size_bytes,
                     });
                 }
@@ -2545,6 +2649,179 @@ pub fn export_moby_glb_with_options(
 }
 
 #[tauri::command]
+pub fn export_moby_fbx_with_options(
+    level_folder: String,
+    asset_tuid_hex: String,
+    out_path: String,
+    options: GlbExportOptions,
+) -> Result<u64, String> {
+    use lunalib::{read_moby_assets_with_total, read_tie_assets_with_total};
+
+    let level_path = std::path::Path::new(&level_folder);
+    let target_tuid = u64::from_str_radix(
+        asset_tuid_hex
+            .trim_start_matches("0x")
+            .trim_start_matches("0X"),
+        16,
+    )
+    .map_err(|e| format!("parse asset tuid {asset_tuid_hex}: {e}"))?;
+
+    let layout = lunalib::detect_layout(level_path).map_err(|e| e.to_string())?;
+
+    let mut moby_asset: Option<lunalib::MobyAsset> = None;
+    let mut tie_asset: Option<lunalib::TieAsset> = None;
+    match layout {
+        LevelLayout::V2 => {
+            read_moby_assets_with_total(
+                level_path,
+                Some(&[target_tuid]),
+                |_| {},
+                |a| {
+                    if a.tuid == target_tuid {
+                        moby_asset = Some(a);
+                    }
+                },
+            )
+            .map_err(|e| e.to_string())?;
+            if moby_asset.is_none() {
+                read_tie_assets_with_total(
+                    level_path,
+                    Some(&[target_tuid]),
+                    |_| {},
+                    |a| {
+                        if a.tuid == target_tuid {
+                            tie_asset = Some(a);
+                        }
+                    },
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        LevelLayout::Tod => {
+            lunalib::read_moby_assets_old(level_path, |a| {
+                if a.tuid == target_tuid {
+                    moby_asset = Some(a);
+                }
+            })
+            .map_err(|e| e.to_string())?;
+            if moby_asset.is_none() {
+                lunalib::read_tie_assets_old(level_path, |a| {
+                    if a.tuid == target_tuid {
+                        tie_asset = Some(a);
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        LevelLayout::Rfom => {
+            lunalib::read_moby_assets_rfom(level_path, |a| {
+                if a.tuid == target_tuid {
+                    moby_asset = Some(a);
+                }
+            })
+            .map_err(|e| e.to_string())?;
+            if moby_asset.is_none() {
+                lunalib::read_tie_assets_rfom(level_path, |a| {
+                    if a.tuid == target_tuid {
+                        tie_asset = Some(a);
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    let asset = match moby_asset {
+        Some(a) => a,
+        None => {
+            let tie = tie_asset
+                .ok_or_else(|| format!("asset {asset_tuid_hex} not found in level"))?;
+            tie_as_moby(&tie)
+        }
+    };
+
+    if !options.include_mesh {
+        return Err("include_mesh=false is not yet supported".into());
+    }
+
+    let shaders = if options.include_materials {
+        match layout {
+            LevelLayout::V2 => read_shaders(level_path).map_err(|e| e.to_string())?,
+            LevelLayout::Tod => lunalib::read_shaders_old(level_path).unwrap_or_default(),
+            LevelLayout::Rfom => lunalib::read_shaders_rfom(level_path).unwrap_or_default(),
+        }
+    } else {
+        HashMap::new()
+    };
+
+    let texture_pngs = if options.include_materials {
+        let mut needed: HashSet<u32> = HashSet::new();
+        for bangle in &asset.bangles {
+            for m in &bangle.meshes {
+                let (a, _n, _e) =
+                    resolve_shader_textures(&shaders, &asset.shader_tuids, m.shader_index as usize);
+                if let Some(id) = a {
+                    needed.insert(id);
+                }
+            }
+        }
+        let max_dim = options.texture_max_dim.unwrap_or(u32::MAX);
+        let cache_root = cache_root(&level_folder);
+        let tex_dir = cache_root.join("textures");
+        let mut out = HashMap::with_capacity(needed.len());
+        for id in &needed {
+            let path = tex_dir.join(format!("{id}.png"));
+            if let Ok(bytes) = fs::read(&path) {
+                let resized = if max_dim != 0 && max_dim < u32::MAX {
+                    lunalib::downsample_png_to(&bytes, max_dim).unwrap_or(bytes)
+                } else {
+                    bytes
+                };
+                out.insert(*id, resized);
+            }
+        }
+        out
+    } else {
+        HashMap::new()
+    };
+
+    let mut clips: Vec<DecodedClip> = Vec::new();
+    if options.include_armature && asset.skeleton.is_some() {
+        let animset_index = if matches!(layout, LevelLayout::V2) {
+            AnimsetIndex::build(level_path).ok()
+        } else {
+            None
+        };
+        let mut animsets_file = if matches!(layout, LevelLayout::V2) {
+            std::fs::File::open(level_path.join("animsets.dat")).ok()
+        } else {
+            None
+        };
+        let target_tuid_u = u64::from_str_radix(
+            asset_tuid_hex
+                .trim_start_matches("0x")
+                .trim_start_matches("0X"),
+            16,
+        )
+        .unwrap_or(0);
+        if let Some((_asset_again, decoded)) = try_load_skinned_moby_for_level(
+            level_path,
+            layout,
+            target_tuid_u,
+            animset_index.as_ref(),
+            animsets_file.as_mut(),
+        ) {
+            clips = decoded;
+        }
+    }
+
+    let fbx_bytes = lunalib::write_moby_fbx(&asset, &clips, &shaders, &texture_pngs)
+        .map_err(|e| format!("FBX build failed: {e}"))?;
+    fs::write(&out_path, &fbx_bytes).map_err(|e| format!("write {out_path}: {e}"))?;
+    Ok(fbx_bytes.len() as u64)
+}
+
+#[tauri::command]
 pub fn export_skybox(
     level_folder: String,
     format: String,
@@ -2612,23 +2889,147 @@ pub enum LevelGlbExportEvent {
     Error { message: String },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LevelExportFormat {
+    Glb { with_anims: bool },
+    Fbx,
+}
+
 #[tauri::command]
 pub fn export_level_glb(
     level_folder: String,
     out_path: String,
     on_event: Channel<LevelGlbExportEvent>,
 ) -> Result<(), String> {
-    if let Err(message) = run_export_level_glb(&level_folder, &out_path, &on_event) {
+    if let Err(message) = run_export_level(
+        &level_folder,
+        &out_path,
+        &on_event,
+        LevelExportFormat::Glb { with_anims: true },
+    ) {
         let _ = on_event.send(LevelGlbExportEvent::Error { message: message.clone() });
         return Err(message);
     }
     Ok(())
 }
 
-fn run_export_level_glb(
+#[tauri::command]
+pub fn export_level_fbx(
+    level_folder: String,
+    out_path: String,
+    on_event: Channel<LevelGlbExportEvent>,
+) -> Result<(), String> {
+    if let Err(message) =
+        run_export_level(&level_folder, &out_path, &on_event, LevelExportFormat::Fbx)
+    {
+        let _ = on_event.send(LevelGlbExportEvent::Error { message: message.clone() });
+        return Err(message);
+    }
+    Ok(())
+}
+
+fn try_load_skinned_moby_for_level(
+    level_path: &Path,
+    layout: LevelLayout,
+    tuid: u64,
+    animset_index: Option<&AnimsetIndex>,
+    animsets_file: Option<&mut std::fs::File>,
+) -> Option<(lunalib::MobyAsset, Vec<DecodedClip>)> {
+    let mut asset: Option<lunalib::MobyAsset> = None;
+    match layout {
+        LevelLayout::V2 => {
+            let _ = lunalib::read_moby_assets_with_total(
+                level_path,
+                Some(&[tuid]),
+                |_| {},
+                |a| {
+                    if a.tuid == tuid {
+                        asset = Some(a);
+                    }
+                },
+            );
+        }
+        LevelLayout::Tod => {
+            let _ = lunalib::read_moby_assets_old(level_path, |a| {
+                if a.tuid == tuid {
+                    asset = Some(a);
+                }
+            });
+        }
+        LevelLayout::Rfom => {
+            let _ = lunalib::read_moby_assets_rfom(level_path, |a| {
+                if a.tuid == tuid {
+                    asset = Some(a);
+                }
+            });
+        }
+    }
+    let asset = asset?;
+    if asset.skeleton.is_none() {
+        return None;
+    }
+
+    let (trans_shift, scale_shift_v) = {
+        let s = asset.skeleton.as_ref()?;
+        (s.translation_shift, s.scale_shift)
+    };
+    let pos_scale = if (trans_shift as u32) < 15 {
+        1.0 / (0x8000u32 >> trans_shift) as f32
+    } else {
+        1.0 / 32768.0
+    };
+    let scale_scale = if (scale_shift_v as u32) < 15 {
+        1.0 / (0x8000u32 >> scale_shift_v) as f32
+    } else {
+        1.0 / 32768.0
+    };
+
+    let mut clips: Vec<DecodedClip> = Vec::new();
+
+    if matches!(layout, LevelLayout::Rfom | LevelLayout::Tod)
+        && !asset.rfom_anim_offsets.is_empty()
+    {
+        if let Some(skel) = asset.skeleton.as_ref() {
+            let main_dat = match layout {
+                LevelLayout::Tod => "main.dat",
+                _ => "ps3levelmain.dat",
+            };
+            clips.extend(decode_clips_for_moby_inline(
+                level_path,
+                main_dat,
+                &asset.rfom_anim_offsets,
+                pos_scale,
+                scale_scale,
+                skel,
+                layout,
+                asset.tuid,
+            ));
+        }
+    }
+
+    if matches!(layout, LevelLayout::V2) {
+        if let (Some(hash), Some(idx), Some(file)) =
+            (asset.animset_hash, animset_index, animsets_file)
+        {
+            clips.extend(decode_clips_for_moby(
+                level_path,
+                idx,
+                file,
+                hash,
+                pos_scale,
+                scale_scale,
+            ));
+        }
+    }
+
+    Some((asset, clips))
+}
+
+fn run_export_level(
     level_folder: &str,
     out_path: &str,
     on_event: &Channel<LevelGlbExportEvent>,
+    format: LevelExportFormat,
 ) -> Result<(), String> {
     use base64::engine::general_purpose::STANDARD as BASE64;
 
@@ -2642,6 +3043,72 @@ fn run_export_level_glb(
 
     if mobys.is_empty() && ties.is_empty() {
         return Err("No placements found in this level. Open and extract the level cache first.".into());
+    }
+
+    let level_path = Path::new(level_folder);
+    let layout = lunalib::detect_layout(level_path).ok();
+    let with_anims = matches!(format, LevelExportFormat::Glb { with_anims: true })
+        || matches!(format, LevelExportFormat::Fbx);
+
+    let mut skinned_classes: HashMap<String, (lunalib::MobyAsset, Vec<DecodedClip>)> = HashMap::new();
+    let mut shaders_for_anim: HashMap<u64, ShaderInfo> = HashMap::new();
+
+    if with_anims {
+        if let Some(lay) = layout {
+            let mut unique_tuids: HashSet<String> = HashSet::new();
+            for inst in &mobys {
+                unique_tuids.insert(inst.asset_tuid.clone());
+            }
+            shaders_for_anim = match lay {
+                LevelLayout::V2 => read_shaders(level_path).unwrap_or_default(),
+                LevelLayout::Tod => lunalib::read_shaders_old(level_path).unwrap_or_default(),
+                LevelLayout::Rfom => lunalib::read_shaders_rfom(level_path).unwrap_or_default(),
+            };
+            let animset_index = if matches!(lay, LevelLayout::V2) {
+                AnimsetIndex::build(level_path).ok()
+            } else {
+                None
+            };
+            let mut animsets_file = if matches!(lay, LevelLayout::V2) {
+                std::fs::File::open(level_path.join("animsets.dat")).ok()
+            } else {
+                None
+            };
+
+            let _ = on_event.send(LevelGlbExportEvent::Phase {
+                label: "Loading skinned characters",
+                total: unique_tuids.len(),
+            });
+            let mut scanned = 0usize;
+            for tuid_hex in &unique_tuids {
+                scanned += 1;
+                if scanned % 4 == 0 {
+                    let _ = on_event.send(LevelGlbExportEvent::Progress { current: scanned });
+                }
+                let tuid_u = match u64::from_str_radix(
+                    tuid_hex.trim_start_matches("0x").trim_start_matches("0X"),
+                    16,
+                ) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                if let Some((asset, clips)) = try_load_skinned_moby_for_level(
+                    level_path,
+                    lay,
+                    tuid_u,
+                    animset_index.as_ref(),
+                    animsets_file.as_mut(),
+                ) {
+                    skinned_classes.insert(tuid_hex.clone(), (asset, clips));
+                }
+            }
+            let _ = on_event.send(LevelGlbExportEvent::Progress { current: scanned });
+            eprintln!(
+                "[level-glb] skinned classes detected: {} of {} unique moby tuids",
+                skinned_classes.len(),
+                unique_tuids.len()
+            );
+        }
     }
 
     let _ = on_event.send(LevelGlbExportEvent::Phase {
@@ -2725,6 +3192,9 @@ fn run_export_level_glb(
         if progress % 16 == 0 {
             let _ = on_event.send(LevelGlbExportEvent::Progress { current: progress });
         }
+        if skinned_classes.contains_key(&inst.asset_tuid) {
+            continue;
+        }
         if let Some(idx) = load_one("moby", &inst.asset_tuid)? {
             instances.push(lunalib::level_glb::LevelGlbInstance {
                 asset_idx: idx,
@@ -2791,6 +3261,41 @@ fn run_export_level_glb(
         if sky_added { "yes (dome geometry)" } else { "no" }
     );
 
+    let mut skinned_placements: Vec<lunalib::level_glb::SkinnedPlacement> = Vec::new();
+    if with_anims && !skinned_classes.is_empty() {
+        for (_tuid, (asset, _clips)) in &skinned_classes {
+            for bangle in &asset.bangles {
+                for m in &bangle.meshes {
+                    let (a, n, e) = resolve_shader_textures(
+                        &shaders_for_anim,
+                        &asset.shader_tuids,
+                        m.shader_index as usize,
+                    );
+                    for id in [a, n, e].into_iter().flatten() {
+                        needed_textures.insert(id);
+                    }
+                }
+            }
+        }
+        for inst in &mobys {
+            if let Some((asset, clips)) = skinned_classes.get(&inst.asset_tuid) {
+                skinned_placements.push(lunalib::level_glb::SkinnedPlacement {
+                    asset: asset.clone(),
+                    clips: clips.clone(),
+                    name: format!("moby:{}:{}", inst.name, inst.tuid),
+                    translation: inst.position,
+                    rotation: inst.quaternion,
+                    scale: inst.scale,
+                });
+            }
+        }
+        eprintln!(
+            "[level-glb] skinned placements queued: {} (across {} classes)",
+            skinned_placements.len(),
+            skinned_classes.len()
+        );
+    }
+
     let _ = on_event.send(LevelGlbExportEvent::Phase {
         label: "Loading textures",
         total: needed_textures.len(),
@@ -2811,18 +3316,50 @@ fn run_export_level_glb(
     }
     let _ = on_event.send(LevelGlbExportEvent::Progress { current: tex_progress });
 
+    let phase_label: &'static str = match format {
+        LevelExportFormat::Glb { with_anims: true } if !skinned_placements.is_empty() => {
+            "Writing animated GLB"
+        }
+        LevelExportFormat::Glb { .. } => "Writing GLB",
+        LevelExportFormat::Fbx if !skinned_placements.is_empty() => "Writing animated FBX",
+        LevelExportFormat::Fbx => "Writing FBX",
+    };
     let _ = on_event.send(LevelGlbExportEvent::Phase {
-        label: "Writing GLB",
+        label: phase_label,
         total: 1,
     });
 
-    let glb_bytes = lunalib::level_glb::write_static_level_glb(&assets, &instances, &textures)
-        .map_err(|e| format!("write_static_level_glb: {e}"))?;
+    let out_bytes = match format {
+        LevelExportFormat::Glb { with_anims: true } if !skinned_placements.is_empty() => {
+            lunalib::level_glb::write_animated_level_glb(
+                &assets,
+                &instances,
+                &skinned_placements,
+                &shaders_for_anim,
+                &textures,
+            )
+            .map_err(|e| format!("write_animated_level_glb: {e}"))?
+        }
+        LevelExportFormat::Glb { .. } => {
+            lunalib::level_glb::write_static_level_glb(&assets, &instances, &textures)
+                .map_err(|e| format!("write_static_level_glb: {e}"))?
+        }
+        LevelExportFormat::Fbx => {
+            lunalib::write_animated_level_fbx(
+                &assets,
+                &instances,
+                &skinned_placements,
+                &shaders_for_anim,
+                &textures,
+            )
+            .map_err(|e| format!("write_animated_level_fbx (binary): {e}"))?
+        }
+    };
 
-    fs::write(out_path, &glb_bytes).map_err(|e| format!("write {out_path}: {e}"))?;
+    fs::write(out_path, &out_bytes).map_err(|e| format!("write {out_path}: {e}"))?;
 
     let _ = on_event.send(LevelGlbExportEvent::Done {
-        bytes_written: glb_bytes.len(),
+        bytes_written: out_bytes.len(),
         instance_count: instances.len(),
         asset_count: assets.len(),
     });

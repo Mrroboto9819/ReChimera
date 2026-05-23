@@ -32,10 +32,12 @@ import {
   listLevelFiles,
   listLevelSounds,
   openLevel,
+  readCachedAsset,
   wavBlobUrl,
   type AnimsetSummary,
   type CacheEvent,
   type CacheStatus,
+  type CubemapDescriptor,
   type ExtractedSound,
   type GltfFile,
   type Instance,
@@ -80,7 +82,7 @@ import {
 } from "./export";
 import { ExportProgress } from "./components/ExportProgress";
 import { useSelection } from "./selection";
-import { APP_VERSION, APP_REPO_URL, APP_ISSUES_URL, openExternal } from "./version";
+import { APP_VERSION, APP_BRAND_NAME, APP_REPO_URL, APP_ISSUES_URL, openExternal } from "./version";
 import {
   resetAll,
   setBottomPct,
@@ -172,6 +174,8 @@ export function App() {
   
   
   const [textureBlobs, setTextureBlobs] = useState<TextureBlobMap | null>(null);
+  const [cubemapDescriptor, setCubemapDescriptor] =
+    useState<CubemapDescriptor | null>(null);
   const selection = useSelection(useCallback(() => instances, [instances]));
   const edits = useEdits();
   const bottomPanelRef = useRef<ImperativePanelHandle>(null);
@@ -194,20 +198,6 @@ export function App() {
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
-      switch (e.code) {
-        case "Numpad1":
-          setViewSnap((s) => ({ direction: "front", version: s.version + 1 }));
-          e.preventDefault();
-          return;
-        case "Numpad3":
-          setViewSnap((s) => ({ direction: "right", version: s.version + 1 }));
-          e.preventDefault();
-          return;
-        case "Numpad7":
-          setViewSnap((s) => ({ direction: "top", version: s.version + 1 }));
-          e.preventDefault();
-          return;
-      }
       if (!selection.primary) return;
       switch (e.key.toLowerCase()) {
         case "g":
@@ -295,7 +285,7 @@ export function App() {
   const [cacheManifest, setCacheManifest] =
     useState<import("./api").CacheManifest | null>(null);
   const [cacheProgress, setCacheProgress] = useState<{
-    phase: "mobys" | "ties" | "materials" | "normalmaps" | "textures";
+    phase: "mobys" | "ties" | "materials" | "normalmaps" | "textures" | "ufrags";
     current: number;
     total: number;
   } | null>(null);
@@ -353,7 +343,7 @@ export function App() {
   
   
   const [focusVersion, setFocusVersion] = useState(0);
-  const [viewSnap, setViewSnap] = useState<{
+  const [viewSnap] = useState<{
     direction: "front" | "right" | "top" | null;
     version: number;
   }>({ direction: null, version: 0 });
@@ -640,6 +630,9 @@ export function App() {
                 total: event.total,
               });
               break;
+            case "item":
+              // ignored — we read everything via loadFromCache after `done`
+              break;
             case "progress":
               setCacheProgress({
                 phase: phaseTotals.phase,
@@ -677,6 +670,7 @@ export function App() {
       setBusy(true);
       setMeshes(null);
       setTextureBlobs(null);
+      setCubemapDescriptor(null);
       setMeshLoadPhase({
         phase: "layout",
         label: "Preparing extraction",
@@ -693,15 +687,14 @@ export function App() {
           setCacheState(status);
           needExtract = !status.exists || status.incomplete;
         }
+
         if (needExtract) {
           await runCacheExtract(sum.folder, cacheMode === "force-reextract");
           const status = await cacheStatus(sum.folder);
           setCacheState(status);
         }
-
         const manifest = await readCachedManifest(sum.folder);
         setCacheManifest(manifest);
-
         setMeshLoadPhase({
           phase: "mobys",
           label: "Loading from cache",
@@ -725,22 +718,26 @@ export function App() {
             chunkSize: 1,
           });
         });
-
         setMeshes(meshes);
+        const cubeEntry = manifest.entries.find((e) => e.kind === "cubemap");
+        if (cubeEntry) {
+          readCachedAsset(sum.folder, cubeEntry.file)
+            .then((d) => setCubemapDescriptor(d as CubemapDescriptor))
+            .catch(() => setCubemapDescriptor(null));
+        }
+
         log(
           "ok",
           `Loaded from cache: ${meshes.moby_assets.length} mobys, ${meshes.tie_assets.length} ties, ${meshes.ufrag_meshes.length} terrain, ${meshes.textures.length} textures, ${meshes.moby_assets.reduce((s, a) => s + (a.embedded_animation_count ?? 0), 0)} anims`,
         );
 
-        // Stream textures in the background so meshes appear instantly.
-        // The Viewport's material cache (`getMaterial` at Viewport.tsx:
-        // ~733) handles late-arriving textures by updating `m.map` and
-        // setting `m.needsUpdate = true` when the texture finally lands,
-        // so materials refresh automatically — no need to block the
-        // mesh render on the full texture set.
+        // Old flow: meshes render first (dim / untextured), THEN
+        // the full texture set lands as one batch. No progressive
+        // onBatch updates — `useTextureMap` in the viewport binds
+        // them all in one pass when the Map identity changes.
         const ids = meshes.textures.map((t) => t.id);
         if (ids.length > 0) {
-          loadCachedTextures(sum.folder, ids)
+          loadCachedTextures(sum.folder, ids, { concurrency: 32 })
             .then((blobs) => setTextureBlobs(blobs))
             .catch((err) =>
               log("error", `Texture cache fetch failed: ${err}`),
@@ -1095,6 +1092,7 @@ export function App() {
             cacheManifest?.entries.some((e) => e.kind === "sky") ?? false
           }
           cacheVersion={cacheManifest?.entries.length ?? 0}
+          cubemapDescriptor={cubemapDescriptor}
         />
       </div>
     ),
@@ -1123,7 +1121,7 @@ export function App() {
               className="brand-icon"
               draggable={false}
             />
-            ReChimera
+            {APP_BRAND_NAME}
             <span className="brand-version mono small">v{APP_VERSION}</span>
           </span>
 
@@ -1188,13 +1186,6 @@ export function App() {
               Details
             </MenuCheckItem>
             <MenuCheckItem
-              checked={view.showLights}
-              onToggle={() => toggle("showLights")}
-              disabled={!summary}
-            >
-              Lights
-            </MenuCheckItem>
-            <MenuCheckItem
               checked={view.showEnvSamplers}
               onToggle={() => toggle("showEnvSamplers")}
               disabled={!summary}
@@ -1217,12 +1208,12 @@ export function App() {
               disabled={!summary}
             >
               {view.skyboxTextureId != null
-                ? `Skybox: tex ${view.skyboxTextureId}`
-                : "Skybox: pick texture…"}
+                ? `Cubemap: tex ${view.skyboxTextureId}`
+                : "Cubemap: pick texture…"}
             </MenuItem>
             {view.skyboxTextureId != null && (
               <MenuItem onSelect={() => dispatch(setSkybox(null))}>
-                Clear skybox
+                Clear cubemap
               </MenuItem>
             )}
             <MenuCheckItem
@@ -1523,6 +1514,7 @@ export function App() {
         initialSoundKey={cacheModalInitialSoundKey}
         sounds={levelSounds}
         currentSkyboxTextureId={view.skyboxTextureId}
+        cubemapDescriptor={cubemapDescriptor}
         onUseAsSkybox={(id) => {
           dispatch(setSkybox(id < 0 ? null : id));
           if (id >= 0) {
@@ -1837,6 +1829,7 @@ export function App() {
       <AboutModal
         open={aboutModalOpen}
         onClose={() => setAboutModalOpen(false)}
+        updater={updater}
       />
 
       <DocsModal

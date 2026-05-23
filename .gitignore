@@ -18,6 +18,7 @@ tmp_textures/
 tmp/
 tmp_*/
 *.tsbuildinfo
+temp.rs
 
 # Insomniac game data — copyrighted, never commit
 *.dat
@@ -65,10 +66,6 @@ secrets/
 
 # GCP / Firebase / Google Cloud service-account credentials
 service-account*.json
-
-# Compiled vite config emitted by `tsc -b`
-apps/desktop/vite.config.js
-apps/desktop/vite.config.d.ts
 
 # Environment / secrets
 .env

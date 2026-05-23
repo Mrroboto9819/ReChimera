@@ -362,7 +362,7 @@ textarea {
 .about-name {
   font-size: 18px;
   font-weight: 600;
-  color: var(--accent-red);
+  color: var(--brand-fixed);
   letter-spacing: 0.2px;
 }
 
@@ -2662,13 +2662,13 @@ textarea {
 }
 
 .btn-update {
-  background: linear-gradient(180deg, hsl(35, 100%, 56%), hsl(28, 100%, 50%));
+  background: var(--brand-fixed);
   color: #1a0e00;
   font-weight: 600;
-  border: 1px solid hsla(35, 100%, 56%, 0.6);
+  border: 1px solid var(--brand-fixed);
 }
 .btn-update:hover {
-  background: linear-gradient(180deg, hsl(35, 100%, 62%), hsl(28, 100%, 56%));
+  filter: brightness(1.1);
 }
 
 .loading-banner {
@@ -4411,6 +4411,71 @@ textarea {
   border-radius: 6px;
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
+}
+.viewport-zoom-slider {
+  position: absolute;
+  left: 18px;
+  bottom: 48px;
+  z-index: 6;
+  height: 160px;
+  width: 16px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 4px 0;
+  opacity: 0.35;
+  transition: opacity 160ms ease;
+  user-select: none;
+}
+.viewport-zoom-slider:hover,
+.viewport-zoom-slider.is-active {
+  opacity: 1;
+}
+.viewport-zoom-track {
+  position: relative;
+  width: 2px;
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 1px;
+  cursor: ns-resize;
+  /* Generous invisible hit-area so the user can grab without
+     hitting the 2px-wide bar exactly. */
+}
+.viewport-zoom-track::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  right: -7px;
+  top: 0;
+  bottom: 0;
+}
+.viewport-zoom-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--accent-blue);
+  border-radius: 1px;
+  pointer-events: none;
+  transition: height 80ms linear;
+}
+.viewport-zoom-handle {
+  position: absolute;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(7, 8, 10, 0.85);
+  pointer-events: none;
+  transition: top 80ms linear;
+}
+.viewport-zoom-slider.is-active .viewport-zoom-handle {
+  transition: none;
+}
+.viewport-zoom-slider.is-active .viewport-zoom-fill {
+  transition: none;
 }
 .viewport-tool-btn {
   width: 30px;

@@ -258,10 +258,90 @@ pub fn read_gameplay_rfom(level_folder: &Path) -> Result<GameplayLayout> {
         eprintln!("[rfom-gp-moby] {} moby placements scaled to meters", moby_instances.len());
     }
 
+    let slot3_added = decode_slot3_placements(&mut ig, instances_ptr, &mut moby_instances)?;
+    if slot3_added > 0 && std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
+        eprintln!(
+            "[rfom-gp-slot3] decoded {} additional placements from gameplay slot[3]",
+            slot3_added
+        );
+    }
+
     Ok(GameplayLayout {
         regions: vec![Region {
             name: if region_name.is_empty() { "art".to_string() } else { region_name },
             moby_instances,
         }],
     })
+}
+
+fn decode_slot3_placements<R: std::io::Read + std::io::Seek>(
+    ig: &mut IgFile<R>,
+    instances_ptr: u64,
+    out: &mut Vec<MobyInstance>,
+) -> Result<usize> {
+    const SLOT3_RECORD_SIZE: u64 = 0x30;
+    let group_off = instances_ptr + 0x50 + 3 * 16;
+    ig.stream.seek_to(group_off)?;
+    let items_ptr = u64::from(ig.stream.read_u32()?);
+    let num_items = ig.stream.read_u32()?;
+    if items_ptr == 0 || num_items == 0 {
+        return Ok(0);
+    }
+
+    let log = std::env::var("RECHIMERA_LOG_PROBES").is_ok();
+    let mut added = 0usize;
+    for i in 0..num_items {
+        let base = items_ptr + (i as u64) * SLOT3_RECORD_SIZE;
+        ig.stream.seek_to(base + 0x00)?;
+        let class_ptr = u64::from(ig.stream.read_u32()?);
+        ig.stream.seek_to(base + 0x04)?;
+        let pos = ig.stream.read_vec3()?;
+        ig.stream.seek_to(base + 0x10)?;
+        let qx = ig.stream.read_f32()?;
+        let qy = ig.stream.read_f32()?;
+        let qz = ig.stream.read_f32()?;
+        let _qw = ig.stream.read_f32()?;
+        let sx = ig.stream.read_f32().unwrap_or(1.0);
+        let sy = ig.stream.read_f32().unwrap_or(1.0);
+        let _sz = if (sx - sy).abs() < 0.001 { sx } else { sx };
+
+        if !pos[0].is_finite() || !pos[1].is_finite() || !pos[2].is_finite() {
+            continue;
+        }
+        if pos[0].abs() > 1.0e6 || pos[1].abs() > 1.0e6 || pos[2].abs() > 1.0e6 {
+            continue;
+        }
+
+        let class_idx = if class_ptr != 0 {
+            match ig.stream.seek_to(class_ptr) {
+                Ok(_) => ig.stream.read_u16().unwrap_or(0xFFFF),
+                Err(_) => 0xFFFF,
+            }
+        } else {
+            0xFFFF
+        };
+
+        let position_m = [pos[0] * YARD_TO_M, pos[1] * YARD_TO_M, pos[2] * YARD_TO_M];
+        let rot_euler = [qx, qy, qz];
+
+        if log && added < 3 {
+            eprintln!(
+                "[rfom-gp-slot3] [{i}] class_ptr=0x{class_ptr:X} class=0x{class_idx:04X} raw_yards=({:.2}, {:.2}, {:.2}) → m=({:.2}, {:.2}, {:.2})",
+                pos[0], pos[1], pos[2],
+                position_m[0], position_m[1], position_m[2]
+            );
+        }
+
+        out.push(MobyInstance {
+            moby_tuid: u64::from(class_idx),
+            instance_tuid: 0x10000 | i as u64,
+            name: format!("Slot3_{class_idx:04X}_Instance_{i:04X}"),
+            position: position_m,
+            rotation: rot_euler,
+            scale: 1.0,
+            group: 0,
+        });
+        added += 1;
+    }
+    Ok(added)
 }

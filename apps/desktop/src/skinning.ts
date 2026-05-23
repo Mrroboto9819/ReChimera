@@ -78,7 +78,7 @@ export function buildSkinnedAsset(
   root.name = `skin_${asset.asset_tuid}`;
   for (let i = 0; i < sk.bone_count; i++) {
     const pi = sk.parents[i] ?? -1;
-    if (pi < 0 || pi >= bones.length) {
+    if (pi < 0 || pi >= bones.length || pi === i) {
       root.add(bones[i]!);
     } else {
       bones[pi]!.add(bones[i]!);

@@ -1,18 +1,19 @@
 {
   "name": "rechimera-desktop",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "version:bump": "bun ../../scripts/bump-version.mjs",
     "version:sync": "bun ../../scripts/sync-version.mjs",
-    "version:check": "bun ../../scripts/sync-version.mjs --check"
+    "version:check": "bun ../../scripts/sync-version.mjs --check",
+    "version:canary": "bun ../../scripts/sync-version.mjs --canary"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.3",

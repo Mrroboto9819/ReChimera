@@ -256,6 +256,8 @@ pub fn read_regions_rfom(level_folder: &Path) -> Result<Vec<Zone>> {
     Ok(vec![Zone {
         tuid: 0,
         tie_instances: Vec::new(),
+        shrub_instances: Vec::new(),
+        foliage_instances: Vec::new(),
         ufrags,
         ufrag_shader_tuids: identity_shader_tuids,
     }])

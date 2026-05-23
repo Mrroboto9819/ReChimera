@@ -536,12 +536,40 @@ pub(crate) fn real_tie_layout(folder: &str) -> Option<Vec<InstanceDto>> {
             }
         }
         _ => {
-            for zone in read_zones(path).ok()? {
+            let zones = read_zones(path).ok()?;
+            let zone_count = zones.len();
+            let mut tie_count = 0usize;
+            let mut shrub_count = 0usize;
+            let mut foliage_count = 0usize;
+            for zone in zones {
+                tie_count += zone.tie_instances.len();
+                shrub_count += zone.shrub_instances.len();
+                foliage_count += zone.foliage_instances.len();
                 for inst in zone.tie_instances {
                     out.push(tie_instance_dto(&inst));
                 }
+                for inst in zone.shrub_instances {
+                    out.push(shrub_instance_dto(&inst));
+                }
+                for inst in zone.foliage_instances {
+                    out.push(foliage_instance_dto(&inst));
+                }
+            }
+            if std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
+                eprintln!(
+                    "[v2-tie] read_zones returned {} zones: {} tie / {} shrub / {} foliage placements",
+                    zone_count, tie_count, shrub_count, foliage_count
+                );
             }
         }
+    }
+    if std::env::var("RECHIMERA_LOG_PROBES").is_ok()
+        && matches!(lunalib::detect_layout(path), Ok(lunalib::LevelLayout::V2))
+    {
+        eprintln!(
+            "[v2-layout] real_tie_layout produced {} total instances",
+            out.len()
+        );
     }
     (!out.is_empty()).then_some(out)
 }
@@ -718,6 +746,13 @@ fn run_level_stream(folder: &str, on_event: &Channel<LevelEvent>) -> Result<(), 
         }
     }
 
+    if std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
+        eprintln!(
+            "[v2-match] unique moby tuids in placements: {}, unique tie tuids in placements: {}",
+            moby_tuids.len(),
+            tie_tuids.len()
+        );
+    }
     let moby_tuids: Vec<u64> = moby_tuids.into_iter().collect();
     let tie_tuids: Vec<u64> = tie_tuids.into_iter().collect();
     let _ = on_event.send(LevelEvent::Progress { current: 1 });
@@ -738,6 +773,7 @@ fn run_level_stream(folder: &str, on_event: &Channel<LevelEvent>) -> Result<(), 
 
     {
         let mut moby_done = 0usize;
+        let mut emitted_moby_tuids: Vec<u64> = Vec::new();
         read_moby_assets_with_total(
             path,
             Some(&moby_tuids),
@@ -783,6 +819,7 @@ fn run_level_stream(folder: &str, on_event: &Channel<LevelEvent>) -> Result<(), 
                     bind_pose_inverse_offset: asset.bind_pose_inverse_offset,
                     embedded_animation_count: asset.rfom_anim_offsets.len() as u32,
                 };
+                emitted_moby_tuids.push(asset.tuid);
                 let _ = on_event.send(LevelEvent::MobyAsset { asset: dto });
                 moby_done += 1;
                 let _ = on_event.send(LevelEvent::Progress { current: moby_done });
@@ -790,6 +827,25 @@ fn run_level_stream(folder: &str, on_event: &Channel<LevelEvent>) -> Result<(), 
             },
         )
         .map_err(|e| e.to_string())?;
+        if std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
+            let placement_set: std::collections::HashSet<u64> =
+                moby_tuids.iter().copied().collect();
+            let emitted_set: std::collections::HashSet<u64> =
+                emitted_moby_tuids.iter().copied().collect();
+            let matched = placement_set.intersection(&emitted_set).count();
+            let sample_emitted: Vec<String> = emitted_moby_tuids
+                .iter()
+                .take(5)
+                .map(|t| format!("0x{:016X}", t))
+                .collect();
+            eprintln!(
+                "[v2-match] mobys: {} placement tuids, {} emitted assets, {} match — first emitted: {:?}",
+                placement_set.len(),
+                emitted_set.len(),
+                matched,
+                sample_emitted
+            );
+        }
     }
 
 
@@ -2842,9 +2898,11 @@ fn main() {
             cache::export_skybox,
             cache::read_cached_skybox_meta,
             cache::export_moby_glb_with_options,
+            cache::export_moby_fbx_with_options,
             cache::list_animsets,
             cache::decode_animset_clip,
             cache::export_level_glb,
+            cache::export_level_fbx,
             cache::export_texture_png,
             cache::export_texture_dds,
             level_layout,

@@ -13,7 +13,7 @@ interface StatusBarProps {
   error: string | null;
   cacheState?: CacheStatus | null;
   cacheProgress?: {
-    phase: "mobys" | "ties" | "materials" | "normalmaps" | "textures";
+    phase: "mobys" | "ties" | "materials" | "normalmaps" | "textures" | "ufrags";
     current: number;
     total: number;
   } | null;

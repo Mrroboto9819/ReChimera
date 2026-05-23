@@ -113,6 +113,8 @@ pub fn read_zones_old(level_folder: &Path) -> Result<Vec<Zone>> {
     Ok(vec![Zone {
         tuid: 0,
         tie_instances,
+        shrub_instances: Vec::new(),
+        foliage_instances: Vec::new(),
         ufrags,
         ufrag_shader_tuids,
     }])

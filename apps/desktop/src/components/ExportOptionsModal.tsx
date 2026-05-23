@@ -242,7 +242,9 @@ export function ExportOptionsModal({
     >
       {step === "scope" && (
         <div className="export-step">
-          <p className="dim small">What should the GLB contain?</p>
+          <p className="dim small">
+            What should the GLB contain?
+          </p>
           <label className="export-toggle">
             <input
               type="checkbox"

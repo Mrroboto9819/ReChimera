@@ -36,25 +36,55 @@ pub fn write_moby_glb_with_animations(
     write_moby_glb_full(asset, clips, &HashMap::new(), &HashMap::new())
 }
 
-pub fn write_moby_glb_full(
+pub struct GltfDocBuilder {
+    pub bin: Vec<u8>,
+    pub accessors: Vec<gltf_json::Accessor>,
+    pub buffer_views: Vec<gltf_json::buffer::View>,
+    pub nodes: Vec<gltf_json::Node>,
+    pub skins: Vec<gltf_json::Skin>,
+    pub animations: Vec<gltf_json::Animation>,
+    pub images: Vec<gltf_json::Image>,
+    pub gltf_textures: Vec<gltf_json::Texture>,
+    pub materials: Vec<gltf_json::Material>,
+    pub meshes: Vec<gltf_json::Mesh>,
+    pub image_idx_by_tex_id: HashMap<u32, u32>,
+}
+
+impl GltfDocBuilder {
+    pub fn new() -> Self {
+        Self {
+            bin: Vec::new(),
+            accessors: Vec::new(),
+            buffer_views: Vec::new(),
+            nodes: Vec::new(),
+            skins: Vec::new(),
+            animations: Vec::new(),
+            images: Vec::new(),
+            gltf_textures: Vec::new(),
+            materials: Vec::new(),
+            meshes: Vec::new(),
+            image_idx_by_tex_id: HashMap::new(),
+        }
+    }
+}
+
+impl Default for GltfDocBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub fn append_moby_to_doc(
+    doc: &mut GltfDocBuilder,
     asset: &MobyAsset,
     clips: &[DecodedClip],
     shaders: &HashMap<u64, ShaderInfo>,
     textures: &HashMap<u32, Vec<u8>>,
-) -> Result<Vec<u8>> {
-    let mut bin: Vec<u8> = Vec::new();
-    let mut accessors: Vec<gltf_json::Accessor> = Vec::new();
-    let mut buffer_views: Vec<gltf_json::buffer::View> = Vec::new();
-    let mut nodes: Vec<gltf_json::Node> = Vec::new();
-    let mut skins: Vec<gltf_json::Skin> = Vec::new();
-    let mut animations: Vec<gltf_json::Animation> = Vec::new();
-    let mut images: Vec<gltf_json::Image> = Vec::new();
-    let mut gltf_textures: Vec<gltf_json::Texture> = Vec::new();
-    let mut materials: Vec<gltf_json::Material> = Vec::new();
-
-    let mut image_idx_by_tex_id: HashMap<u32, u32> = HashMap::new();
-
-    nodes.push(gltf_json::Node {
+    placement: Option<([f32; 3], [f32; 4], [f32; 3])>,
+) -> Result<u32> {
+    let asset_root_idx = doc.nodes.len() as u32;
+    let (translation, rotation, scale) = placement.unwrap_or(([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]));
+    doc.nodes.push(gltf_json::Node {
         camera: None,
         children: None,
         extensions: Default::default(),
@@ -62,23 +92,23 @@ pub fn write_moby_glb_full(
         matrix: None,
         mesh: None,
         name: Some(asset_display_name(asset)),
-        rotation: None,
-        scale: None,
-        translation: None,
+        rotation: Some(gltf_json::scene::UnitQuaternion(rotation)),
+        scale: Some(scale),
+        translation: Some(translation),
         skin: None,
         weights: None,
     });
-    let asset_root_idx: u32 = 0;
 
     let skin_idx = if let Some(skel) = asset.skeleton.as_ref() {
         if !skel.bones.is_empty() && !skel.bind_local.is_empty() {
             Some(emit_skin(
-                &mut bin,
-                &mut accessors,
-                &mut buffer_views,
-                &mut nodes,
-                &mut skins,
+                &mut doc.bin,
+                &mut doc.accessors,
+                &mut doc.buffer_views,
+                &mut doc.nodes,
+                &mut doc.skins,
                 skel,
+                asset_root_idx,
             ))
         } else {
             None
@@ -88,11 +118,15 @@ pub fn write_moby_glb_full(
     };
 
     let (bone_node_base, bone_count) = match (skin_idx, asset.skeleton.as_ref()) {
-        (Some(_), Some(skel)) => (1u32, skel.bones.len()),
+        (Some(s), Some(skel)) => {
+            let _ = s;
+            let count = skel.bones.len();
+            let base = (doc.nodes.len() - count) as u32;
+            (base, count)
+        }
         _ => (0u32, 0usize),
     };
 
-    let mut meshes: Vec<gltf_json::Mesh> = Vec::new();
     let mut bangle_node_indices: Vec<u32> = Vec::new();
     let mut total_primitives = 0usize;
 
@@ -104,21 +138,21 @@ pub fn write_moby_glb_full(
         let mut bangle_has_skin = false;
         for mesh in &bangle.meshes {
             let material_idx = build_material(
-                &mut bin,
-                &mut buffer_views,
-                &mut images,
-                &mut gltf_textures,
-                &mut materials,
-                &mut image_idx_by_tex_id,
+                &mut doc.bin,
+                &mut doc.buffer_views,
+                &mut doc.images,
+                &mut doc.gltf_textures,
+                &mut doc.materials,
+                &mut doc.image_idx_by_tex_id,
                 &asset.shader_tuids,
                 shaders,
                 textures,
                 mesh.shader_index as usize,
             );
             if let Some(prim) = push_submesh(
-                &mut bin,
-                &mut accessors,
-                &mut buffer_views,
+                &mut doc.bin,
+                &mut doc.accessors,
+                &mut doc.buffer_views,
                 mesh,
                 skin_idx.is_some(),
                 material_idx,
@@ -137,29 +171,29 @@ pub fn write_moby_glb_full(
         }
         total_primitives += primitives.len();
 
-        let mesh_idx = meshes.len() as u32;
-        meshes.push(gltf_json::Mesh {
+        let mesh_idx = doc.meshes.len() as u32;
+        doc.meshes.push(gltf_json::Mesh {
             extensions: Default::default(),
             extras: Default::default(),
-            name: Some(format!("Mesh_{bi}")),
+            name: Some(format!("{}_Mesh_{bi}", asset_display_name(asset))),
             primitives,
             weights: None,
         });
 
-        let node_idx = nodes.len() as u32;
-        nodes.push(gltf_json::Node {
+        let node_idx = doc.nodes.len() as u32;
+        doc.nodes.push(gltf_json::Node {
             camera: None,
             children: None,
             extensions: Default::default(),
             extras: Default::default(),
             matrix: None,
             mesh: Some(Index::new(mesh_idx)),
-            name: Some(format!("Mesh_{bi}")),
+            name: Some(format!("{}_Mesh_{bi}", asset_display_name(asset))),
             rotation: None,
             scale: None,
             translation: None,
             skin: if bangle_has_skin && skin_idx.is_some() {
-                Some(Index::new(0))
+                Some(Index::new(skin_idx.unwrap()))
             } else {
                 None
             },
@@ -177,7 +211,7 @@ pub fn write_moby_glb_full(
     }
 
     {
-        let root = &mut nodes[asset_root_idx as usize];
+        let root = &mut doc.nodes[asset_root_idx as usize];
         let kids = root.children.get_or_insert_with(Vec::new);
         for n in &bangle_node_indices {
             kids.push(Index::new(*n));
@@ -186,19 +220,45 @@ pub fn write_moby_glb_full(
 
     if skin_idx.is_some() && !clips.is_empty() && bone_count > 0 {
         emit_animations(
-            &mut bin,
-            &mut accessors,
-            &mut buffer_views,
-            &mut animations,
+            &mut doc.bin,
+            &mut doc.accessors,
+            &mut doc.buffer_views,
+            &mut doc.animations,
             clips,
             bone_node_base,
             bone_count,
         );
     }
 
-    while bin.len() % 4 != 0 {
-        bin.push(0);
+    Ok(asset_root_idx)
+}
+
+pub fn write_moby_glb_full(
+    asset: &MobyAsset,
+    clips: &[DecodedClip],
+    shaders: &HashMap<u64, ShaderInfo>,
+    textures: &HashMap<u32, Vec<u8>>,
+) -> Result<Vec<u8>> {
+    let mut doc = GltfDocBuilder::new();
+    let asset_root_idx = append_moby_to_doc(&mut doc, asset, clips, shaders, textures, None)?;
+
+    while doc.bin.len() % 4 != 0 {
+        doc.bin.push(0);
     }
+
+    let GltfDocBuilder {
+        bin,
+        accessors,
+        buffer_views,
+        nodes,
+        skins,
+        animations,
+        images,
+        gltf_textures,
+        materials,
+        meshes,
+        image_idx_by_tex_id: _,
+    } = doc;
 
     let buffer = gltf_json::Buffer {
         byte_length: USize64(bin.len() as u64),
@@ -251,6 +311,7 @@ fn emit_skin(
     nodes: &mut Vec<gltf_json::Node>,
     skins: &mut Vec<gltf_json::Skin>,
     skel: &Skeleton,
+    asset_root_node_idx: u32,
 ) -> u32 {
     let bone_count = skel.bones.len();
     let bone_node_base = nodes.len() as u32;
@@ -331,7 +392,9 @@ fn emit_skin(
         }
     }
     if !asset_root_children.is_empty() {
-        let root_kids = nodes[0].children.get_or_insert_with(Vec::new);
+        let root_kids = nodes[asset_root_node_idx as usize]
+            .children
+            .get_or_insert_with(Vec::new);
         root_kids.extend(asset_root_children);
     }
 
