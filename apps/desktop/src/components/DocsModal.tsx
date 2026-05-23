@@ -10,7 +10,12 @@ import remarkGfm from "remark-gfm";
 import { Modal } from "./Modal";
 import { openExternal } from "../version";
 
-const docsRaw = import.meta.glob("../../../docs/**/*.md", {
+// Path is 4 levels up from this file:
+//   apps/desktop/src/components/  ->  apps/desktop/src/  ->  apps/desktop/
+//   ->  apps/  ->  <repo root>/docs/
+// (Was previously 3 levels — resolved to non-existent apps/docs/ and
+// surfaced as a blank Documentation modal because the glob matched 0 files.)
+const docsRaw = import.meta.glob("../../../../docs/**/*.md", {
   query: "?raw",
   import: "default",
   eager: true,

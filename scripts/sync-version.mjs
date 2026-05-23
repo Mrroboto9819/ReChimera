@@ -11,29 +11,44 @@
  *
  * --canary        Puts the working tree into canary build mode locally,
  *                 mirroring what .github/workflows/release.yml does for
- *                 pushes to the develop branch. Specifically:
+ *                 pushes to the develop branch. Touches the five surfaces
+ *                 the channel identity flows through:
  *
- *                   - Computes a canary version `${base}-${suffix}` where
- *                     `base` is the Cargo.toml version and `suffix` defaults
- *                     to `git rev-list --count HEAD` (a monotonic integer).
- *                     The MSI bundler requires the SemVer pre-release portion
- *                     to be a single numeric value <= 65535 — no words, no
- *                     dots — so the "canary" identity is conveyed by the
- *                     productName / identifier / brand color / icon patches
- *                     below, not by the version string itself.
- *                   - Patches apps/desktop/src-tauri/tauri.conf.json:
- *                       version, productName, identifier, updater endpoint.
- *                     Does NOT touch Cargo.toml or package.json (matches CI,
- *                     keeps the cargo cache hot).
- *                   - Patches the default brandColor in
- *                     apps/desktop/src/store.ts from the stable red to
- *                     the canary yellow.
- *                   - Regenerates the bundled icon set in
- *                     apps/desktop/src-tauri/icons/ from
- *                     apps/desktop/icon_canary.png by shelling out to
- *                     `bun tauri icon`.
+ *                   1. tauri.conf.json
+ *                        version + productName + window title + identifier
+ *                        + updater endpoint
+ *                   2. package.json
+ *                        version (Vite reads this at build time for
+ *                        APP_VERSION shown in the title bar)
+ *                   3. apps/desktop/src/store.ts
+ *                        default brandColor flips from red to yellow
+ *                   4. apps/desktop/src/App.tsx
+ *                        brand text literal swaps to "ReChimera Canary"
+ *                   5. apps/desktop/icon.png
+ *                        overwritten with icon_canary.png (Vite bundles
+ *                        this as the frontend brand icon)
+ *                   6. apps/desktop/src-tauri/icons/
+ *                        OS-level binary icon set regenerated from
+ *                        icon_canary.png via `bun tauri icon`
  *
- *                 To undo: `git checkout -- apps/desktop/src-tauri/{tauri.conf.json,icons} apps/desktop/src/store.ts`.
+ *                 Cargo.toml is NOT touched (so the Cargo cache stays hot).
+ *
+ *                 The canary version is `${base}-${suffix}` where `base` is
+ *                 the Cargo.toml version and `suffix` defaults to
+ *                 `git rev-list --count HEAD` (a monotonic integer). The
+ *                 MSI bundler requires the SemVer pre-release portion to be
+ *                 a single numeric value <= 65535 — no words, no dots — so
+ *                 the "canary" word is conveyed by the productName /
+ *                 identifier / brand color / icon, not by the version string.
+ *
+ *                 To undo every patch:
+ *                   git checkout -- \
+ *                     apps/desktop/package.json \
+ *                     apps/desktop/icon.png \
+ *                     apps/desktop/src/App.tsx \
+ *                     apps/desktop/src/store.ts \
+ *                     apps/desktop/src-tauri/tauri.conf.json \
+ *                     apps/desktop/src-tauri/icons
  *
  * --suffix=<n>    Overrides the auto-detected suffix with a custom integer.
  *                 Must be a non-negative number <= 65535 (MSI bundle limit).
@@ -48,7 +63,7 @@
  *   node scripts/sync-version.mjs --canary --suffix=42
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -65,6 +80,8 @@ const cargoPath = resolve(repoRoot, "Cargo.toml");
 const pkgPath = resolve(repoRoot, "apps/desktop/package.json");
 const tauriPath = resolve(repoRoot, "apps/desktop/src-tauri/tauri.conf.json");
 const storePath = resolve(repoRoot, "apps/desktop/src/store.ts");
+const appTsxPath = resolve(repoRoot, "apps/desktop/src/App.tsx");
+const frontendIconPath = resolve(repoRoot, "apps/desktop/icon.png");
 const canaryIconPath = resolve(repoRoot, "apps/desktop/icon_canary.png");
 
 const CANARY_PRODUCT_NAME = "ReChimera Canary";
@@ -155,13 +172,20 @@ function runCanary() {
   console.log(`[sync-version]   canary ver.  : ${canaryVersion}`);
 
   patchTauriConfForCanary(canaryVersion);
+  patchPackageJsonVersion(canaryVersion);
   patchStoreBrandColor();
+  patchAppTsxBrandText();
+  swapFrontendIcon();
   regenerateCanaryIcons();
 
   console.log(`\n[sync-version] canary prep done.`);
-  console.log(
-    `[sync-version] to revert: git checkout -- apps/desktop/src-tauri/{tauri.conf.json,icons} apps/desktop/src/store.ts`,
-  );
+  console.log(`[sync-version] to revert: git checkout -- \\`);
+  console.log(`  apps/desktop/package.json \\`);
+  console.log(`  apps/desktop/icon.png \\`);
+  console.log(`  apps/desktop/src/App.tsx \\`);
+  console.log(`  apps/desktop/src/store.ts \\`);
+  console.log(`  apps/desktop/src-tauri/tauri.conf.json \\`);
+  console.log(`  apps/desktop/src-tauri/icons`);
 }
 
 function resolveSuffix() {
@@ -241,6 +265,11 @@ function patchTauriConfForCanary(canaryVersion) {
   tauri.version = canaryVersion;
   tauri.productName = CANARY_PRODUCT_NAME;
   tauri.identifier = CANARY_IDENTIFIER;
+  // Window title shows in the OS taskbar / Alt+Tab — mirror productName so
+  // the channel is visible there too, matching the CI workflow.
+  if (Array.isArray(tauri.app?.windows) && tauri.app.windows[0]) {
+    tauri.app.windows[0].title = CANARY_PRODUCT_NAME;
+  }
   tauri.plugins = tauri.plugins ?? {};
   tauri.plugins.updater = tauri.plugins.updater ?? {};
   tauri.plugins.updater.endpoints = [canaryEndpoint];
@@ -248,8 +277,63 @@ function patchTauriConfForCanary(canaryVersion) {
   writeFileSync(tauriPath, JSON.stringify(tauri, null, 2) + "\n");
   console.log(`[sync-version] tauri.conf.json patched`);
   console.log(`[sync-version]   productName  → ${CANARY_PRODUCT_NAME}`);
+  console.log(`[sync-version]   windowTitle  → ${CANARY_PRODUCT_NAME}`);
   console.log(`[sync-version]   identifier   → ${CANARY_IDENTIFIER}`);
   console.log(`[sync-version]   updater endp → ${canaryEndpoint}`);
+}
+
+function patchPackageJsonVersion(canaryVersion) {
+  // APP_VERSION in apps/desktop/src/version.ts reads from package.json at
+  // Vite build time (also injected as `__APP_VERSION__` via vite.config.ts's
+  // define block). Without this patch the title bar shows the unpatched
+  // base version (e.g. v0.4.0) instead of the canary version (v0.4.0-N).
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  if (pkg.version === canaryVersion) {
+    console.log(`[sync-version] package.json version already ${canaryVersion}`);
+    return;
+  }
+  pkg.version = canaryVersion;
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+  console.log(`[sync-version] package.json version → ${canaryVersion}`);
+}
+
+function patchAppTsxBrandText() {
+  // App.tsx has a hardcoded "ReChimera" literal next to the brand icon
+  // in the top-left of the title bar. Swap it to "ReChimera Canary" so the
+  // user-visible brand text matches the channel.
+  const s = readFileSync(appTsxPath, "utf-8");
+  const next = s.replace(
+    /(<img\s+src=\{brandIconUrl\}[\s\S]*?\/>\s*\n\s*)ReChimera(\s*\n\s*<span className="brand-version)/,
+    `$1${CANARY_PRODUCT_NAME}$2`,
+  );
+  if (next === s) {
+    if (s.includes(`            ${CANARY_PRODUCT_NAME}\n`)) {
+      console.log(`[sync-version] App.tsx brand text already "${CANARY_PRODUCT_NAME}"`);
+      return;
+    }
+    console.error(
+      "[sync-version] brand text anchor not found in App.tsx — regex may be stale",
+    );
+    process.exit(1);
+  }
+  writeFileSync(appTsxPath, next);
+  console.log(`[sync-version] App.tsx brand text → ${CANARY_PRODUCT_NAME}`);
+}
+
+function swapFrontendIcon() {
+  // Vite bundles apps/desktop/icon.png as a static asset for the frontend
+  // brand icon (title bar / About / Splash / Settings) via `?url` imports.
+  // The src-tauri/icons/ regen below covers the OS-level binary icon, but
+  // the frontend keeps showing the stable red icon until we overwrite
+  // icon.png with the canary source.
+  if (!existsSync(canaryIconPath)) {
+    console.error(
+      `[sync-version] canary icon source not found at ${canaryIconPath}`,
+    );
+    process.exit(1);
+  }
+  copyFileSync(canaryIconPath, frontendIconPath);
+  console.log(`[sync-version] apps/desktop/icon.png ← icon_canary.png  (frontend icon)`);
 }
 
 function patchStoreBrandColor() {
