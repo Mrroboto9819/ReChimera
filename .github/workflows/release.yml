@@ -177,43 +177,32 @@ jobs:
           PRERELEASE: ${{ needs.compute-mode.outputs.prerelease }}
         run: |
           set -euo pipefail
-          if [ "$CHANNEL" = "stable" ] && [ -f RELEASE_NOTES.md ]; then
-            BODY=$(cat RELEASE_NOTES.md)
-            echo "Stable: using RELEASE_NOTES.md ($(wc -l < RELEASE_NOTES.md) lines)"
-          elif [ "$CHANNEL" = "stable" ]; then
-            BODY=$(cat <<EOF
-          **ReChimera v$VERSION** — built from \`${{ github.sha }}\` on \`main\`.
-
-          Cross-platform desktop binaries built by the release workflow.
-          Pick the installer for your OS below.
-
-          See [NOTICE.md](https://github.com/${{ github.repository }}/blob/v$VERSION/NOTICE.md)
-          for upstream attributions and third-party licenses, and the
-          [commit log](https://github.com/${{ github.repository }}/commits/v$VERSION)
-          for changes since the previous release.
-
-          **Game data is not included.** Bring your own legitimately-acquired
-          extracted level folders.
-          EOF
-          )
-            echo "Stable: RELEASE_NOTES.md missing — used fallback template"
+          # Both channels publish RELEASE_NOTES.md as the body. Canary adds a
+          # short pre-release banner on top so users know they're looking at a
+          # canary build, but the feature list / patch notes below it are the
+          # same content that ships with stable.
+          if [ -f RELEASE_NOTES.md ]; then
+            NOTES=$(cat RELEASE_NOTES.md)
+            echo "Using RELEASE_NOTES.md ($(wc -l < RELEASE_NOTES.md) lines)"
           else
-            BODY=$(cat <<EOF
-          **ReChimera Canary $VERSION**
+            NOTES="_(RELEASE_NOTES.md missing from this commit — see commit log for changes.)_"
+            echo "::warning::RELEASE_NOTES.md not found; using a placeholder body"
+          fi
 
-          Auto-built from commit \`${{ github.sha }}\` on the \`develop\` branch.
-          This is a pre-release — installs side-by-side with the stable
-          \`ReChimera\` app (different bundle identifier, different settings
-          store) and auto-updates from the rolling \`canary-latest\` channel.
+          if [ "$CHANNEL" = "canary" ]; then
+            BANNER=$(cat <<EOF
+          > ⚠️ **Pre-release — canary build \`$VERSION\`**
+          > Auto-built from commit [\`${{ github.sha }}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) on \`develop\`. Installs side-by-side with stable (different identifier + icon + settings store) and auto-updates from the rolling \`canary-latest\` channel. Expect breakage — when filing issues, paste the full version string above so we can pin which canary build broke. ([Diff vs \`main\`](https://github.com/${{ github.repository }}/compare/main...${{ github.sha }}))
 
-          - [Commit](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
-          - [Diff vs main](https://github.com/${{ github.repository }}/compare/main...${{ github.sha }})
+          ---
 
-          **Expect breakage.** When filing issues against \`develop\`, paste
-          the full version string above so we can pin which canary build broke.
           EOF
           )
-            echo "Canary: generated release body for $TAG"
+            BODY="${BANNER}
+          ${NOTES}"
+            echo "Canary: prepended banner to RELEASE_NOTES.md"
+          else
+            BODY="$NOTES"
           fi
           RELEASE_ID=$(gh api \
             --method POST \

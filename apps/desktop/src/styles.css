@@ -2662,13 +2662,13 @@ textarea {
 }
 
 .btn-update {
-  background: linear-gradient(180deg, hsl(35, 100%, 56%), hsl(28, 100%, 50%));
+  background: var(--brand-fixed);
   color: #1a0e00;
   font-weight: 600;
-  border: 1px solid hsla(35, 100%, 56%, 0.6);
+  border: 1px solid var(--brand-fixed);
 }
 .btn-update:hover {
-  background: linear-gradient(180deg, hsl(35, 100%, 62%), hsl(28, 100%, 56%));
+  filter: brightness(1.1);
 }
 
 .loading-banner {

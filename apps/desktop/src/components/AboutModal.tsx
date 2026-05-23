@@ -1,6 +1,7 @@
 import iconUrl from "../../icon.png?url";
 import { Modal } from "./Modal";
 import { APP_VERSION, APP_BRAND_NAME, APP_REPO_URL, APP_ISSUES_URL, openExternal } from "../version";
+import type { UpdaterState } from "../useUpdater";
 
 
 
@@ -23,6 +24,7 @@ function onAboutClick(e: React.MouseEvent<HTMLDivElement>) {
 interface AboutModalProps {
   open: boolean;
   onClose: () => void;
+  updater?: UpdaterState;
 }
 
 interface CreditEntry {
@@ -66,7 +68,9 @@ const PEOPLE: CreditEntry[] = [
 
 
 
-export function AboutModal({ open, onClose }: AboutModalProps) {
+export function AboutModal({ open, onClose, updater }: AboutModalProps) {
+  const updateAvailable = updater?.phase.kind === "available" ? updater.phase : null;
+  const isDownloading = updater?.phase.kind === "downloading";
   return (
     <Modal
       open={open}
@@ -76,6 +80,27 @@ export function AboutModal({ open, onClose }: AboutModalProps) {
       size="lg"
       footer={
         <>
+          {updateAvailable && (
+            <button
+              type="button"
+              className="btn btn-update"
+              onClick={() => void updater?.install()}
+              title={
+                updateAvailable.manual
+                  ? `v${updateAvailable.update.version} available — opens GitHub Releases`
+                  : `Update available — v${updateAvailable.update.version}`
+              }
+            >
+              {updateAvailable.manual
+                ? `↗ Get v${updateAvailable.update.version} on GitHub`
+                : `↑ Update to v${updateAvailable.update.version}`}
+            </button>
+          )}
+          {isDownloading && (
+            <button type="button" className="btn" disabled>
+              Downloading update…
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-secondary"

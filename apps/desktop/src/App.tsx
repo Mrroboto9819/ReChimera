@@ -1829,6 +1829,7 @@ export function App() {
       <AboutModal
         open={aboutModalOpen}
         onClose={() => setAboutModalOpen(false)}
+        updater={updater}
       />
 
       <DocsModal
