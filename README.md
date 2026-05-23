@@ -22,9 +22,26 @@ ReChimera loads a level folder, decodes its meshes / textures / skeletons / anim
 
 Deep documentation lives in [`docs/`](docs/) and inside the running app under **Help → Documentation**.
 
+## Download
+
+Two release channels, both auto-updating on Windows:
+
+| | <img src="apps/desktop/icon.png" width="22" align="top" alt=""> &nbsp;**Stable**  | <img src="apps/desktop/icon_canary.png" width="22" align="top" alt=""> &nbsp;**Canary** |
+|---|---|---|
+| Built from | `main` | `develop` |
+| Cadence | tagged releases when something's ready to ship | every push to `develop` |
+| Use it when | you want a build you can rely on | you want to test in-flight work / new game support before it lands in stable |
+| Bundle identifier | `dev.rechimera.desktop` | `dev.rechimera.desktop.canary` |
+| Title bar | red wordmark | yellow wordmark |
+| **Download** | **[Latest stable release →](https://github.com/Mrroboto9819/ReChimera/releases/latest)** | **[Latest canary builds →](https://github.com/Mrroboto9819/ReChimera/releases?q=canary&expanded=true)** |
+
+Stable and canary **install side-by-side** — different identifiers, different settings stores, different icons. You can run both on the same machine to compare behavior. Each channel auto-updates independently: stable updates only when a new stable releases, canary updates on every push to `develop`. macOS / Linux users replace the binary manually.
+
+> ⚠️ Canary is bleeding edge — expect breakage. File issues with the full version string (e.g. `0.4.0-15`) so we can pin which build broke.
+
 ## Use
 
-1. Grab the latest installer from [Releases](https://github.com/Mrroboto9819/ReChimera/releases). Windows auto-updates; macOS / Linux: replace the binary manually.
+1. Pick a channel from **[Download](#download)** above and install it.
 2. Extract every `.psarc` that ships with your level into a single folder (use any PSARC extractor, or the wizard's built-in **Extract a PSARC** step).
 3. Point ReChimera at that folder — it auto-detects the engine era from the layout marker (`assetlookup.dat`, `ps3levelmain.dat`, or `main.dat`).
 
