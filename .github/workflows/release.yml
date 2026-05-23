@@ -331,11 +331,16 @@ jobs:
             const fs = require("fs");
             const p = "src/store.ts";
             const s = fs.readFileSync(p, "utf8");
-            const next = s.replace(/brandColor:\s*"#[0-9a-fA-F]{6}"/, `brandColor: "${process.env.BRAND_COLOR}"`);
-            if (next === s) {
-              console.error("::error::brandColor literal not found in src/store.ts — bailing");
+            const re = /brandColor:\s*"#[0-9a-fA-F]{6}"/;
+            // Check the anchor matches the SOURCE (not that the result
+            // differs) so this is idempotent: stable replaces #FF6363 ->
+            // #FF6363 (no-op), canary replaces #FF6363 -> #fcd202 (real
+            // change). Both are fine. Only a missing literal flags a bug.
+            if (!re.test(s)) {
+              console.error("::error::brandColor literal not found in src/store.ts — regex anchor may be stale");
               process.exit(1);
             }
+            const next = s.replace(re, `brandColor: "${process.env.BRAND_COLOR}"`);
             fs.writeFileSync(p, next);
           '
 
