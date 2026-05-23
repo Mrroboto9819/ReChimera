@@ -362,7 +362,7 @@ textarea {
 .about-name {
   font-size: 18px;
   font-weight: 600;
-  color: var(--accent-red);
+  color: var(--brand-fixed);
   letter-spacing: 0.2px;
 }
 

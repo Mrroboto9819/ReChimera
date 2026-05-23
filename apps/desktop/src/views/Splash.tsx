@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import gsap from "gsap";
 import iconUrl from "../../icon.png?url";
+import { APP_BRAND_NAME } from "../version";
 
 interface SplashProps {
   
@@ -125,7 +126,7 @@ export function Splash({ visible, onExit }: SplashProps) {
           className="splash-name"
           style={{ opacity: 0, transform: "translateY(14px)" }}
         >
-          ReChimera
+          {APP_BRAND_NAME}
         </h1>
         <div
           ref={loaderRef}

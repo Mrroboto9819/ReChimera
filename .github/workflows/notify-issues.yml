@@ -1,0 +1,78 @@
+name: notify-issues
+
+# Posts a Discord embed to DISCORD_WEBHOOK_URL whenever a new issue is
+# filed (or a closed one is reopened). Uses the same secret as the
+# release workflow — set ISSUE_WEBHOOK_URL instead if you want issues
+# routed to a different Discord channel than CI notifications.
+
+on:
+  issues:
+    types: [opened, reopened]
+
+jobs:
+  discord:
+    runs-on: ubuntu-latest
+    # Skip Dependabot / GitHub-Actions / other bot-opened issues so the
+    # channel stays human-signal.
+    if: github.event.issue.user.type != 'Bot'
+    steps:
+      - name: Post issue to Discord
+        if: env.WEBHOOK != ''
+        shell: bash
+        env:
+          # Falls back to DISCORD_WEBHOOK_URL when no dedicated
+          # ISSUE_WEBHOOK_URL secret is set, so this works out of the box
+          # for repos that already wired the release webhook.
+          WEBHOOK: ${{ secrets.ISSUE_WEBHOOK_URL || secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          ACTION=$(jq -r '.action' "$GITHUB_EVENT_PATH")
+          case "$ACTION" in
+            opened)   EMOJI="🐛"; COLOR=15548997 ;;  # red
+            reopened) EMOJI="🔁"; COLOR=16566834 ;;  # orange
+            *)        EMOJI="📌"; COLOR=3447003 ;;   # blue
+          esac
+
+          PAYLOAD=$(jq -n \
+            --slurpfile e "$GITHUB_EVENT_PATH" \
+            --arg emoji "$EMOJI" \
+            --arg action "$ACTION" \
+            --argjson color "$COLOR" \
+            '{
+              embeds: [{
+                title: "\($emoji) Issue \($action): #\($e[0].issue.number) — \($e[0].issue.title)",
+                url: $e[0].issue.html_url,
+                description: (
+                  ($e[0].issue.body // "_(no body)_")
+                  | if length > 500 then .[0:500] + "…" else . end
+                ),
+                color: $color,
+                author: {
+                  name: $e[0].issue.user.login,
+                  icon_url: $e[0].issue.user.avatar_url,
+                  url: $e[0].issue.user.html_url
+                },
+                fields: [
+                  {
+                    name: "Labels",
+                    value: (
+                      $e[0].issue.labels
+                      | map("`" + .name + "`")
+                      | if length == 0 then "_(none)_" else join(" ") end
+                    ),
+                    inline: true
+                  },
+                  {
+                    name: "Repo",
+                    value: "[\($e[0].repository.full_name)](\($e[0].repository.html_url))",
+                    inline: true
+                  }
+                ],
+                timestamp: $e[0].issue.created_at
+              }]
+            }')
+
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$WEBHOOK" || echo "Discord notify failed (non-blocking)"

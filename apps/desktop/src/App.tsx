@@ -82,7 +82,7 @@ import {
 } from "./export";
 import { ExportProgress } from "./components/ExportProgress";
 import { useSelection } from "./selection";
-import { APP_VERSION, APP_REPO_URL, APP_ISSUES_URL, openExternal } from "./version";
+import { APP_VERSION, APP_BRAND_NAME, APP_REPO_URL, APP_ISSUES_URL, openExternal } from "./version";
 import {
   resetAll,
   setBottomPct,
@@ -1121,7 +1121,7 @@ export function App() {
               className="brand-icon"
               draggable={false}
             />
-            ReChimera
+            {APP_BRAND_NAME}
             <span className="brand-version mono small">v{APP_VERSION}</span>
           </span>
 

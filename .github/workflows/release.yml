@@ -367,21 +367,41 @@ jobs:
             echo "Overwriting apps/desktop/icon.png with $ICON_SOURCE (Vite frontend icon)"
             cp "$GITHUB_WORKSPACE/$ICON_SOURCE" icon.png
 
-            # App.tsx:1124 hardcodes `ReChimera` as the brand text next to
-            # the icon. We swap it to `ReChimera Canary` ONLY on the canary
-            # channel — the surrounding `<img src={brandIconUrl} … />` is
-            # the anchor so the replacement is structurally bounded.
-            echo "Patching brand text in src/App.tsx -> ReChimera Canary"
+            # version.ts exports APP_BRAND_NAME — a single constant imported
+            # by App.tsx (title bar), Splash.tsx (splash screen),
+            # AboutModal.tsx (About header), and SettingsModal.tsx (Settings
+            # hero). One patch here flips all four surfaces at once.
+            echo "Patching APP_BRAND_NAME in src/version.ts -> ReChimera Canary"
             node -e '
               const fs = require("fs");
-              const p = "src/App.tsx";
+              const p = "src/version.ts";
               const s = fs.readFileSync(p, "utf8");
               const next = s.replace(
-                /(<img\s+src=\{brandIconUrl\}[\s\S]*?\/>\s*\n\s*)ReChimera(\s*\n\s*<span className="brand-version)/,
-                "$1ReChimera Canary$2"
+                /(export const APP_BRAND_NAME\s*=\s*)"ReChimera"/,
+                "$1\"ReChimera Canary\""
               );
               if (next === s) {
-                console.error("::error::brand text anchor not found in App.tsx around brandIconUrl + brand-version span");
+                console.error("::error::APP_BRAND_NAME literal not found in version.ts");
+                process.exit(1);
+              }
+              fs.writeFileSync(p, next);
+            '
+
+            # `--brand-fixed` is the CSS variable that colors every
+            # brand-name surface (.brand, .splash-name, .settings-hero-name,
+            # .about-name). Default is the stable red — patch to yellow on
+            # canary so the wordmark visually matches the channel.
+            echo "Patching --brand-fixed in src/styles.css -> $BRAND_COLOR"
+            node -e '
+              const fs = require("fs");
+              const p = "src/styles.css";
+              const s = fs.readFileSync(p, "utf8");
+              const next = s.replace(
+                /(--brand-fixed:\s*)#[0-9a-fA-F]{6};/,
+                `$1${process.env.BRAND_COLOR};`
+              );
+              if (next === s) {
+                console.error("::error::--brand-fixed literal not found in styles.css");
                 process.exit(1);
               }
               fs.writeFileSync(p, next);

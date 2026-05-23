@@ -4,6 +4,7 @@ import iconUrl from "../../icon.png?url";
 import { Modal } from "./Modal";
 import { SUPPORTED_LANGUAGES, type Language } from "../i18n";
 import {
+  APP_BRAND_NAME,
   APP_ISSUES_URL,
   APP_REPO_URL,
   APP_VERSION,
@@ -148,7 +149,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       <header className="settings-hero">
         <img src={iconUrl} alt="" className="settings-hero-logo" />
         <div className="settings-hero-text">
-          <div className="settings-hero-name">ReChimera</div>
+          <div className="settings-hero-name">{APP_BRAND_NAME}</div>
           <div className="settings-hero-meta small dim">
             v{APP_VERSION} · by VELD-Dev &amp; contributors
           </div>

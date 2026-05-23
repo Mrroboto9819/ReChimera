@@ -1,6 +1,6 @@
 import iconUrl from "../../icon.png?url";
 import { Modal } from "./Modal";
-import { APP_VERSION, APP_REPO_URL, APP_ISSUES_URL, openExternal } from "../version";
+import { APP_VERSION, APP_BRAND_NAME, APP_REPO_URL, APP_ISSUES_URL, openExternal } from "../version";
 
 
 
@@ -100,7 +100,7 @@ export function AboutModal({ open, onClose }: AboutModalProps) {
         <header className="about-header">
           <img src={iconUrl} alt="ReChimera" className="about-logo" />
           <div className="about-header-text">
-            <div className="about-name">ReChimera</div>
+            <div className="about-name">{APP_BRAND_NAME}</div>
             <div className="about-version mono small">
               v{APP_VERSION} · Beta
             </div>

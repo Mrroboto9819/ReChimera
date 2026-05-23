@@ -21,13 +21,19 @@
  *                        version (Vite reads this at build time for
  *                        APP_VERSION shown in the title bar)
  *                   3. apps/desktop/src/store.ts
- *                        default brandColor flips from red to yellow
- *                   4. apps/desktop/src/App.tsx
- *                        brand text literal swaps to "ReChimera Canary"
- *                   5. apps/desktop/icon.png
+ *                        default user-tunable brandColor flips red → yellow
+ *                   4. apps/desktop/src/version.ts
+ *                        APP_BRAND_NAME constant flips "ReChimera" →
+ *                        "ReChimera Canary" — imported by App, Splash,
+ *                        About, and Settings so every wordmark switches
+ *                        from a single edit
+ *                   5. apps/desktop/src/styles.css
+ *                        --brand-fixed CSS variable flips red → yellow
+ *                        (colors every wordmark surface)
+ *                   6. apps/desktop/icon.png
  *                        overwritten with icon_canary.png (Vite bundles
  *                        this as the frontend brand icon)
- *                   6. apps/desktop/src-tauri/icons/
+ *                   7. apps/desktop/src-tauri/icons/
  *                        OS-level binary icon set regenerated from
  *                        icon_canary.png via `bun tauri icon`
  *
@@ -45,8 +51,9 @@
  *                   git checkout -- \
  *                     apps/desktop/package.json \
  *                     apps/desktop/icon.png \
- *                     apps/desktop/src/App.tsx \
  *                     apps/desktop/src/store.ts \
+ *                     apps/desktop/src/styles.css \
+ *                     apps/desktop/src/version.ts \
  *                     apps/desktop/src-tauri/tauri.conf.json \
  *                     apps/desktop/src-tauri/icons
  *
@@ -80,7 +87,8 @@ const cargoPath = resolve(repoRoot, "Cargo.toml");
 const pkgPath = resolve(repoRoot, "apps/desktop/package.json");
 const tauriPath = resolve(repoRoot, "apps/desktop/src-tauri/tauri.conf.json");
 const storePath = resolve(repoRoot, "apps/desktop/src/store.ts");
-const appTsxPath = resolve(repoRoot, "apps/desktop/src/App.tsx");
+const versionTsPath = resolve(repoRoot, "apps/desktop/src/version.ts");
+const stylesCssPath = resolve(repoRoot, "apps/desktop/src/styles.css");
 const frontendIconPath = resolve(repoRoot, "apps/desktop/icon.png");
 const canaryIconPath = resolve(repoRoot, "apps/desktop/icon_canary.png");
 
@@ -174,7 +182,8 @@ function runCanary() {
   patchTauriConfForCanary(canaryVersion);
   patchPackageJsonVersion(canaryVersion);
   patchStoreBrandColor();
-  patchAppTsxBrandText();
+  patchVersionTsBrandName();
+  patchStylesBrandFixedColor();
   swapFrontendIcon();
   regenerateCanaryIcons();
 
@@ -182,8 +191,9 @@ function runCanary() {
   console.log(`[sync-version] to revert: git checkout -- \\`);
   console.log(`  apps/desktop/package.json \\`);
   console.log(`  apps/desktop/icon.png \\`);
-  console.log(`  apps/desktop/src/App.tsx \\`);
   console.log(`  apps/desktop/src/store.ts \\`);
+  console.log(`  apps/desktop/src/styles.css \\`);
+  console.log(`  apps/desktop/src/version.ts \\`);
   console.log(`  apps/desktop/src-tauri/tauri.conf.json \\`);
   console.log(`  apps/desktop/src-tauri/icons`);
 }
@@ -297,27 +307,50 @@ function patchPackageJsonVersion(canaryVersion) {
   console.log(`[sync-version] package.json version → ${canaryVersion}`);
 }
 
-function patchAppTsxBrandText() {
-  // App.tsx has a hardcoded "ReChimera" literal next to the brand icon
-  // in the top-left of the title bar. Swap it to "ReChimera Canary" so the
-  // user-visible brand text matches the channel.
-  const s = readFileSync(appTsxPath, "utf-8");
+function patchVersionTsBrandName() {
+  // version.ts exports APP_BRAND_NAME — the single constant imported by
+  // App.tsx, Splash.tsx, AboutModal.tsx, and SettingsModal.tsx. Swapping
+  // this one literal flips every wordmark surface at once.
+  const s = readFileSync(versionTsPath, "utf-8");
   const next = s.replace(
-    /(<img\s+src=\{brandIconUrl\}[\s\S]*?\/>\s*\n\s*)ReChimera(\s*\n\s*<span className="brand-version)/,
-    `$1${CANARY_PRODUCT_NAME}$2`,
+    /(export const APP_BRAND_NAME\s*=\s*)"ReChimera"/,
+    `$1"${CANARY_PRODUCT_NAME}"`,
   );
   if (next === s) {
-    if (s.includes(`            ${CANARY_PRODUCT_NAME}\n`)) {
-      console.log(`[sync-version] App.tsx brand text already "${CANARY_PRODUCT_NAME}"`);
+    if (s.includes(`"${CANARY_PRODUCT_NAME}"`)) {
+      console.log(`[sync-version] version.ts APP_BRAND_NAME already "${CANARY_PRODUCT_NAME}"`);
       return;
     }
     console.error(
-      "[sync-version] brand text anchor not found in App.tsx — regex may be stale",
+      "[sync-version] APP_BRAND_NAME literal not found in version.ts — regex may be stale",
     );
     process.exit(1);
   }
-  writeFileSync(appTsxPath, next);
-  console.log(`[sync-version] App.tsx brand text → ${CANARY_PRODUCT_NAME}`);
+  writeFileSync(versionTsPath, next);
+  console.log(`[sync-version] version.ts APP_BRAND_NAME → ${CANARY_PRODUCT_NAME}`);
+}
+
+function patchStylesBrandFixedColor() {
+  // --brand-fixed colors every wordmark surface (.brand, .splash-name,
+  // .settings-hero-name, .about-name). Default is stable red — flip to
+  // canary yellow so the wordmark visually matches the channel.
+  const s = readFileSync(stylesCssPath, "utf-8");
+  const next = s.replace(
+    /(--brand-fixed:\s*)#[0-9a-fA-F]{6};/,
+    `$1${CANARY_BRAND_COLOR};`,
+  );
+  if (next === s) {
+    if (s.includes(`--brand-fixed: ${CANARY_BRAND_COLOR};`)) {
+      console.log(`[sync-version] styles.css --brand-fixed already ${CANARY_BRAND_COLOR}`);
+      return;
+    }
+    console.error(
+      "[sync-version] --brand-fixed literal not found in styles.css — regex may be stale",
+    );
+    process.exit(1);
+  }
+  writeFileSync(stylesCssPath, next);
+  console.log(`[sync-version] styles.css --brand-fixed → ${CANARY_BRAND_COLOR}`);
 }
 
 function swapFrontendIcon() {

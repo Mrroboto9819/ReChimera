@@ -26,6 +26,14 @@ export const APP_VERSION: string =
   typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : RUNTIME_PACKAGE_VERSION;
 
 
+// Single source of truth for the user-visible product name. Title bar,
+// splash screen, About modal, and Settings hero all import this. CI
+// patches the literal on canary builds (-> "ReChimera Canary") so every
+// brand-name surface flips channel together, with no per-component
+// patches needed.
+export const APP_BRAND_NAME = "ReChimera";
+
+
 export const APP_REPO_URL = "https://github.com/Mrroboto9819/ReChimera";
 
 
