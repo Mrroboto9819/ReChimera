@@ -74,6 +74,7 @@ import { StatusBar } from "./views/StatusBar";
 import { TitleBar } from "./views/TitleBar";
 import { Toolbar } from "./views/Toolbar";
 import { Viewport } from "./views/Viewport";
+import { AssetWorkbench } from "./views/AssetWorkbench";
 import { useEdits } from "./edits";
 import {
   exportToGlb,
@@ -93,6 +94,9 @@ import {
   toggleInspectorHidden,
   toggleView,
   setSkybox,
+  addTabToPanel,
+  moveTab,
+  setActiveTab,
   useAppDispatch,
   useAppSelector,
   type BooleanViewKey,
@@ -296,6 +300,41 @@ export function App() {
     useState<string | null>(null);
   const [cacheModalInitialSoundKey, setCacheModalInitialSoundKey] =
     useState<string | null>(null);
+  // Override input for the AssetWorkbench tab. When set (by the modal's
+  // "open in workbench" button or the Inspector's view-model button), it
+  // takes precedence over the selection-derived primaryInstance so the
+  // workbench can show an asset the user picked from the cache library
+  // even if no instance of it is selected in the level.
+  const [workbenchAsset, setWorkbenchAsset] = useState<
+    { tuid: string; kind: "moby" | "tie" } | null
+  >(null);
+  const panelsState = useAppSelector((s) => s.panels.panels);
+  const openInWorkbench = useCallback(
+    (tuid: string, kind: "moby" | "tie") => {
+      setWorkbenchAsset({ tuid, kind });
+      // Surface the tab in the center panel. If it lives in another
+      // panel, move it; otherwise create it. Then activate.
+      const ownerPanel = (
+        ["left", "right", "bottom", "center"] as const
+      ).find((p) => panelsState[p]?.tabs.includes("assetWorkbench"));
+      if (ownerPanel === "center") {
+        dispatch(setActiveTab({ panelId: "center", viewId: "assetWorkbench" }));
+      } else if (ownerPanel) {
+        dispatch(
+          moveTab({
+            viewId: "assetWorkbench",
+            from: ownerPanel,
+            to: "center",
+          }),
+        );
+      } else {
+        dispatch(
+          addTabToPanel({ panelId: "center", viewId: "assetWorkbench" }),
+        );
+      }
+    },
+    [dispatch, panelsState],
+  );
   
   
   
@@ -759,7 +798,7 @@ export function App() {
   );
 
 
-  const handleOpen = useCallback(async (rawFolder: string) => {
+  const handleOpen = useCallback(async (rawFolder: string, opts?: { skipCachePrompt?: boolean }) => {
     const folder = rawFolder.trim();
     if (!folder) return;
     setOpenLevelModalOpen(false);
@@ -849,12 +888,20 @@ export function App() {
         log("warn", `Cache status check failed: ${e}`);
       }
       if (existing && existing.exists) {
-        log(
-          "info",
-          `Cache detected (${existing.mobys}M / ${existing.ties}T / ${existing.textures}tex) — awaiting user choice`,
-        );
-        setMeshLoadPhase(null);
-        setCachePrompt({ sum, status: existing });
+        if (opts?.skipCachePrompt) {
+          log(
+            "info",
+            `Cache detected (${existing.mobys}M / ${existing.ties}T / ${existing.textures}tex) — auto-using (skipCachePrompt)`,
+          );
+          void loadFullMeshes(sum, "use-cache");
+        } else {
+          log(
+            "info",
+            `Cache detected (${existing.mobys}M / ${existing.ties}T / ${existing.textures}tex) — awaiting user choice`,
+          );
+          setMeshLoadPhase(null);
+          setCachePrompt({ sum, status: existing });
+        }
       } else {
         log("info", "Auto-loading meshes (idle-paced; safe to interact while it runs)");
         void loadFullMeshes(sum, "auto");
@@ -1061,6 +1108,7 @@ export function App() {
         }}
         loadingMeshes={meshLoadPhase !== null}
         onFocusSelected={() => setFocusVersion((v) => v + 1)}
+        onOpenInWorkbench={openInWorkbench}
       />
     ),
     console: (
@@ -1093,6 +1141,15 @@ export function App() {
           }
           cacheVersion={cacheManifest?.entries.length ?? 0}
           cubemapDescriptor={cubemapDescriptor}
+        />
+      </div>
+    ),
+    assetWorkbench: (
+      <div className="panel pane-viewport view-flush">
+        <AssetWorkbench
+          instance={primaryInstance}
+          cacheFolder={summary?.folder ?? null}
+          overrideAsset={workbenchAsset}
         />
       </div>
     ),
@@ -1449,17 +1506,7 @@ export function App() {
           </PanelGroup>
       </div>
 
-      <SoundPlayer
-        nowPlaying={nowPlaying}
-        onLog={log}
-        onClose={() => {
-          if (nowPlayingMirror.current) {
-            nowPlayingMirror.current.audio.pause();
-            URL.revokeObjectURL(nowPlayingMirror.current.blobUrl);
-          }
-          setNowPlaying(null);
-        }}
-      />
+      <SoundPlayer nowPlaying={nowPlaying} onLog={log} />
 
       <StatusBar
         summary={summary}
@@ -1479,7 +1526,7 @@ export function App() {
         open={openLevelModalOpen}
         busy={busy}
         onClose={() => setOpenLevelModalOpen(false)}
-        onOpen={(folder) => handleOpen(folder)}
+        onOpen={(folder, opts) => handleOpen(folder, opts)}
       />
 
       <PsarcModal
@@ -1501,6 +1548,14 @@ export function App() {
       <CacheLibraryModal
         open={cacheLibraryOpen || previewAssetTuid !== null}
         onClose={() => {
+          setCacheLibraryOpen(false);
+          setPreviewAssetTuid(null);
+          setCacheModalInitialPanel(null);
+          setCacheModalInitialTextureId(null);
+          setCacheModalInitialSoundKey(null);
+        }}
+        onOpenInWorkbench={(tuid, kind) => {
+          openInWorkbench(tuid, kind);
           setCacheLibraryOpen(false);
           setPreviewAssetTuid(null);
           setCacheModalInitialPanel(null);

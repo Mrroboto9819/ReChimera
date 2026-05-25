@@ -586,6 +586,13 @@ fn decode_clips_for_moby(
     };
     let offsets = animation_section_offsets(&ig);
     let mut out = Vec::with_capacity(offsets.len());
+    let debug_this = animset_matches_debug_env(animset_hash);
+    if debug_this {
+        eprintln!(
+            "[anim-debug] === animset 0x{animset_hash:016X} ({} clips, skel_bones={skel_bones}) ===",
+            offsets.len()
+        );
+    }
     for (i, off) in offsets.into_iter().enumerate() {
         let mut header = match read_animation_header_at(&mut ig, off) {
             Ok(h) => h,
@@ -596,6 +603,8 @@ fn decode_clips_for_moby(
                 continue;
             }
         };
+        let raw_num_bones = header.num_bones;
+        let raw_stride = header.frame_stride;
         // Additive `numBones` override — IT's LoadAnimations
         // (gltf_shared.cpp ~542) overwrites the clip's stored numBones with
         // the skeleton's full bone count BEFORE reading any control-blob
@@ -607,6 +616,27 @@ fn decode_clips_for_moby(
         if header.is_additive() && skel_bones > 0 {
             header.num_bones = skel_bones;
         }
+        header.apply_frame_stride_padding();
+        if debug_this {
+            eprintln!(
+                "[anim-debug] clip[{i:3}] '{}' flags=0x{:04X} (L={} A={} P={}) nb={}->{} nf={} stride={}->{} n16={} n8={} nrv={} frames@0x{:08X} ctrl@0x{:08X}",
+                header.name,
+                header.flags,
+                header.is_looping() as u8,
+                header.is_additive() as u8,
+                header.is_packed_frames() as u8,
+                raw_num_bones,
+                header.num_bones,
+                header.num_frames,
+                raw_stride,
+                header.frame_stride,
+                header.num_16bit_tracks,
+                header.num_8bit_tracks,
+                header.num_reference_values,
+                header.frames_ptr,
+                header.control_ptr,
+            );
+        }
         let ctrl = match read_animation_control(&mut ig, &header) {
             Ok(c) => c,
             Err(e) => {
@@ -617,9 +647,58 @@ fn decode_clips_for_moby(
                 continue;
             }
         };
+        if debug_this {
+            let max_t16_bone = ctrl
+                .track16_masks
+                .iter()
+                .map(|m| m.bone_index)
+                .max()
+                .unwrap_or(0);
+            let max_t8_bone = ctrl
+                .track8_masks
+                .iter()
+                .map(|m| m.bone_index)
+                .max()
+                .unwrap_or(0);
+            eprintln!(
+                "[anim-debug] clip[{i:3}]   ctrl: t16_masks={} (max_bone={}) t8_masks={} (max_bone={}) ref_pose_masks={} blend_masks={}",
+                ctrl.track16_masks.len(),
+                max_t16_bone,
+                ctrl.track8_masks.len(),
+                max_t8_bone,
+                ctrl.ref_pose_masks.len(),
+                ctrl.blend_masks.len(),
+            );
+            if max_t16_bone >= skel_bones || max_t8_bone >= skel_bones {
+                eprintln!(
+                    "[anim-debug] clip[{i:3}]   *** WARN: track-mask bone index >= skel_bones={} (track will be silently dropped)",
+                    skel_bones
+                );
+            }
+        }
 
         match decode_animation(&mut ig, &header, &ctrl, position_scale, scale_scale) {
-            Ok(clip) => out.push(clip),
+            Ok(clip) => {
+                if debug_this {
+                    let animated_rot = clip.bones.iter().filter(|b| b.rotation_animated).count();
+                    let animated_pos = clip.bones.iter().filter(|b| b.translation_animated).count();
+                    let animated_scl = clip.bones.iter().filter(|b| b.scale_animated).count();
+                    let first_rots: Vec<f32> = clip
+                        .bones
+                        .first()
+                        .map(|b| b.rotations.iter().take(8).copied().collect())
+                        .unwrap_or_default();
+                    eprintln!(
+                        "[anim-debug] clip[{i:3}]   decoded: bones={} animated R/P/S={}/{}/{} first_bone_rot[0..8]={:?}",
+                        clip.bones.len(),
+                        animated_rot,
+                        animated_pos,
+                        animated_scl,
+                        first_rots,
+                    );
+                }
+                out.push(clip);
+            }
             Err(e) => {
                 eprintln!(
                     "warn: animset 0x{animset_hash:016X} clip[{i}] '{}' decode failed (level {level_folder:?}): {e}",
@@ -629,6 +708,17 @@ fn decode_clips_for_moby(
         }
     }
     out
+}
+
+fn animset_matches_debug_env(animset_hash: u64) -> bool {
+    let Ok(want) = std::env::var("RECHIMERA_DEBUG_ANIMSET") else {
+        return false;
+    };
+    let want = want.trim().trim_start_matches("0x").trim_start_matches("0X");
+    let Ok(v) = u64::from_str_radix(want, 16) else {
+        return false;
+    };
+    v == animset_hash
 }
 
 fn ensure_dirs(root: &Path) -> Result<(), String> {
@@ -789,8 +879,22 @@ fn dump_moby_shader_textures(
                 Some(id) if texture_pngs.contains_key(&id) => format!("0x{:08X}", id),
                 Some(id) => format!("MISSING 0x{:08X}", id),
             };
+            // Why: R2 shaders use IT's V1 lookup (4 hashes: a / n / s / d).
+            // The detail map (slot 3) is sometimes the only non-zero slot
+            // when slots 0-2 are empty, so surface it here so we can spot
+            // those submeshes in the log.
+            let detail = asset
+                .shader_tuids
+                .get(m.shader_index as usize)
+                .and_then(|t| shaders.get(t))
+                .and_then(|s| s.detail_tex_id);
+            let det_state = match detail {
+                None => String::new(),
+                Some(id) if texture_pngs.contains_key(&id) => format!(" det=0x{:08X}", id),
+                Some(id) => format!(" det=MISSING 0x{:08X}", id),
+            };
             eprintln!(
-                "[moby-tex]   submesh[{:3}] b{}.m shader_idx={} (shader_tuid=0x{:016X}) verts={} alb={} nrm={} exp={}",
+                "[moby-tex]   submesh[{:3}] b{}.m shader_idx={} (shader_tuid=0x{:016X}) verts={} alb={} nrm={} exp={}{}",
                 submesh_idx,
                 bangle_idx,
                 m.shader_index,
@@ -799,6 +903,7 @@ fn dump_moby_shader_textures(
                 alb_state,
                 nrm_state,
                 exp_state,
+                det_state,
             );
             submesh_idx += 1;
         }
@@ -2029,6 +2134,69 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                         still_missing.len(),
                         index.len(),
                         attempted,
+                    );
+                }
+            }
+
+            // Cross-level fallback. R2 shares art (lobby UI, coop/MP
+            // overlays, weapon variants) across level PSARCs, not the
+            // globals — so meshes in this level can reference IDs whose
+            // bytes only exist in another already-extracted level. Recompute
+            // still-missing AFTER the global pass and try each sibling
+            // level's textures.dat / highmips.dat as additional sources.
+            // Each sibling call is narrowed by the residual missing set so
+            // it only decodes what we actually need.
+            let after_global: HashSet<u32> = r.iter().map(|(id, _)| *id).collect();
+            let still_missing: Vec<u32> = needed_ids
+                .iter()
+                .copied()
+                .filter(|id| !after_global.contains(id))
+                .collect();
+            if !still_missing.is_empty() {
+                let siblings = lunalib::texture_global::find_sibling_extracted_levels(level_path);
+                if !siblings.is_empty() {
+                    let mut total_recovered = 0usize;
+                    let mut remaining: Vec<u32> = still_missing.clone();
+                    for sibling in &siblings {
+                        if remaining.is_empty() {
+                            break;
+                        }
+                        match lunalib::bulk_extract_pngs(
+                            sibling,
+                            Some(&remaining),
+                            TEXTURE_MAX_DIM,
+                        ) {
+                            Ok(recovered) => {
+                                let mut got: HashSet<u32> = HashSet::new();
+                                for (id, png) in recovered {
+                                    r.push((id, png));
+                                    got.insert(id);
+                                    total_recovered += 1;
+                                }
+                                if !got.is_empty() {
+                                    eprintln!(
+                                        "[cross-level-tex] recovered {} textures from {}",
+                                        got.len(),
+                                        sibling.display(),
+                                    );
+                                }
+                                remaining.retain(|id| !got.contains(id));
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[cross-level-tex] sibling {} failed: {}",
+                                    sibling.display(),
+                                    e,
+                                );
+                            }
+                        }
+                    }
+                    eprintln!(
+                        "[cross-level-tex] total recovered {} / {} via cross-level fallback ({} siblings tried, {} still unrecovered)",
+                        total_recovered,
+                        still_missing.len(),
+                        siblings.len(),
+                        remaining.len(),
                     );
                 }
             }
@@ -3949,6 +4117,7 @@ pub fn decode_animset_clip(
     if header.is_additive() && skel_bone_count > 0 {
         header.num_bones = skel_bone_count;
     }
+    header.apply_frame_stride_padding();
     let ctrl =
         read_animation_control(&mut ig, &header).map_err(|e| format!("control: {e}"))?;
 

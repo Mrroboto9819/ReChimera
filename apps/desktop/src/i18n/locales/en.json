@@ -22,7 +22,21 @@
     "hierarchy": "Hierarchy",
     "inspector": "Inspector",
     "console": "Console",
-    "viewport": "Viewport"
+    "viewport": "Viewport",
+    "assetWorkbench": "Asset"
+  },
+  "assetWorkbench": {
+    "empty": "Select a moby or tie to inspect",
+    "loading": "Loading asset…",
+    "loadFailed": "Failed to load asset",
+    "submeshes": "Submeshes",
+    "textures": "Textures",
+    "animations": "Animations",
+    "noAnimations": "No animations",
+    "play": "Play",
+    "pause": "Pause",
+    "stop": "Stop",
+    "frame": "Frame"
   },
   "tabs": {
     "dropMove": "Move to this panel",

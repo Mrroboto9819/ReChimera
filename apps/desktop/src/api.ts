@@ -896,11 +896,27 @@ export type SoundCategory = "sfx" | "dialog" | "music";
 ///     boundary (e.g. `mus_intro`, `level_mus`, `mus.bnk`) so we don't
 ///     match unrelated words that happen to contain those letters.
 ///   - `bgm` / `theme` / `ost` are common game-music tags.
-const MUSIC_PATTERN = /(^|[^a-z])(music|mus|bgm|theme|ost)([^a-z]|$)/;
-export function classifySound(source: string): SoundCategory {
+// Why: only match tokens that almost always mean music in Insomniac asset
+// naming. We previously had `mus` and `ost` here too, but they false-
+// positive on compound names — `wep_sharpshooter_fire_mono_ost_dko` is a
+// weapon SFX, not music, but it has `_ost_` in it; `mus` similarly
+// trips on `mus`-containing word fragments. Sticking to `music` / `bgm`
+// / `theme` matches every real R2 music track we've seen
+// (`music_lxx_good4_080809_stg`, `music_*`) without dragging in SFX.
+const MUSIC_PATTERN = /(^|[^a-z])(music|bgm|theme)([^a-z]|$)/;
+export function classifySound(source: string, name?: string): SoundCategory {
   const s = source.toLowerCase();
   if (s.includes("dialogue") || s.includes("voice")) return "dialog";
   if (MUSIC_PATTERN.test(s)) return "music";
+  // Why: a sound's source bank ("resident_sound.dat" etc.) doesn't
+  // always declare music vs. sfx — R2 mixes streaming music tracks
+  // (`music_lxx_good4_080809_stg`) into the general resident_sound
+  // bank. Fall through to the sound's own name so per-track music
+  // overlays still land in the Music tab.
+  if (name) {
+    const n = name.toLowerCase();
+    if (MUSIC_PATTERN.test(n)) return "music";
+  }
   return "sfx";
 }
 
@@ -951,6 +967,20 @@ export const listLevelSounds = (level_folder: string) =>
 export const extractLevelSounds = (level_folder: string) =>
   invoke<ExtractedSound[]>("extract_level_sounds", {
     levelFolder: level_folder,
+  });
+
+/// Pack every bank + stream sound the level has into a single .zip at
+/// the given path. Returns the count of WAVs written. Re-extracts from
+/// source banks each call — no cache lookup, but bank decoding is
+/// fast enough that a typical level (1-5 banks, ~5k sounds) finishes
+/// in under a second on modern disks.
+export const bulkExtractSoundsZip = (
+  level_folder: string,
+  zip_out_path: string,
+) =>
+  invoke<number>("bulk_extract_sounds_zip", {
+    levelFolder: level_folder,
+    zipOutPath: zip_out_path,
   });
 
 export const extractOneSound = (
@@ -1146,4 +1176,137 @@ export function psarcExtractStream(
   const ch = new Channel<PsarcEvent>();
   ch.onmessage = onEvent;
   return invoke<void>("psarc_extract_stream", { input, output, onEvent: ch });
+}
+
+export type R2PsarcState = "ready" | "not_extracted" | "missing";
+
+export interface R2SetupStatus {
+  is_usrdir: boolean;
+  global_cached: R2PsarcState;
+  global_uncached: R2PsarcState;
+  level_folder_count: number;
+}
+
+export type R2MapCategory = "campaign" | "multiplayer" | "coop" | "lobby" | "other";
+
+export interface R2MapInfo {
+  id: string;
+  display_name: string;
+  category: R2MapCategory;
+  ready: boolean;
+  psarc_present: boolean;
+}
+
+export type R2ExtractEvent =
+  | { type: "psarc_start"; psarc: string; total: number }
+  | { type: "psarc_progress"; psarc: string; current: number; name: string }
+  | { type: "psarc_done"; psarc: string; skipped: boolean }
+  | { type: "done" }
+  | { type: "warning"; message: string }
+  | { type: "error"; message: string };
+
+export const r2SetupCheck = (usrdir: string) =>
+  invoke<R2SetupStatus>("r2_setup_check", { usrdir });
+
+export const r2ListMaps = (usrdir: string) =>
+  invoke<R2MapInfo[]>("r2_list_maps", { usrdir });
+
+export function r2ExtractGlobals(
+  usrdir: string,
+  onEvent: (e: R2ExtractEvent) => void,
+): Promise<void> {
+  const ch = new Channel<R2ExtractEvent>();
+  ch.onmessage = onEvent;
+  return invoke<void>("r2_extract_globals", { usrdir, onEvent: ch });
+}
+
+export function r2ExtractLevel(
+  usrdir: string,
+  mapId: string,
+  onEvent: (e: R2ExtractEvent) => void,
+): Promise<void> {
+  const ch = new Channel<R2ExtractEvent>();
+  ch.onmessage = onEvent;
+  return invoke<void>("r2_extract_level", { usrdir, mapId, onEvent: ch });
+}
+
+export const r2LevelOpenPath = (usrdir: string, mapId: string) =>
+  invoke<string>("r2_level_open_path", { usrdir, mapId });
+
+export const r2CacheNeedsRebuild = (usrdir: string, mapId: string) =>
+  invoke<boolean>("r2_cache_needs_rebuild", { usrdir, mapId });
+
+export interface R2ThumbnailProbe {
+  matches: Record<string, string[]>;
+  top_level_dirs: string[];
+  image_extensions_seen: string[];
+  scanned_file_count: number;
+  truncated: boolean;
+}
+
+export const r2ProbeLevelThumbnails = (usrdir: string, mapIds: string[]) =>
+  invoke<R2ThumbnailProbe>("r2_probe_level_thumbnails", { usrdir, mapIds });
+
+export async function r2ReadScaleformImage(
+  usrdir: string,
+  fileName: string,
+): Promise<Blob> {
+  const bytes = await invoke<number[] | ArrayBuffer>("r2_read_scaleform_image", {
+    usrdir,
+    fileName,
+  });
+  const buf =
+    bytes instanceof ArrayBuffer
+      ? bytes
+      : new Uint8Array(bytes).buffer;
+  return new Blob([buf], { type: "image/png" });
+}
+
+/// Copy a user-supplied PNG/JPEG into the wizard's external-thumbnail
+/// cache directory and return the safe filename to persist in
+/// localStorage. Used to ingest screenshots / RSX-Debugger-saved
+/// textures so they show up alongside the scaleform sprites as
+/// pickable map thumbnails.
+export const r2ImportThumbnail = (
+  usrdir: string,
+  sourcePath: string,
+  label: string,
+) =>
+  invoke<string>("r2_import_thumbnail", {
+    usrdir,
+    sourcePath,
+    label,
+  });
+
+export async function r2ReadImportedThumbnail(
+  usrdir: string,
+  fileName: string,
+): Promise<Blob> {
+  const bytes = await invoke<number[] | ArrayBuffer>(
+    "r2_read_imported_thumbnail",
+    { usrdir, fileName },
+  );
+  const buf =
+    bytes instanceof ArrayBuffer ? bytes : new Uint8Array(bytes).buffer;
+  return new Blob([buf], { type: "image/png" });
+}
+
+/// Decode a scaleform image then crop to a rectangle, return as PNG Blob.
+/// Used to surface individual chapter cards from atlas files like
+/// `campaignload_id.dds` without parsing the parent SWF.
+export async function r2ReadScaleformImageCrop(
+  usrdir: string,
+  fileName: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): Promise<Blob> {
+  const bytes = await invoke<number[] | ArrayBuffer>(
+    "r2_read_scaleform_image_crop",
+    { usrdir, fileName, x, y, w, h },
+  );
+  const buf =
+    bytes instanceof ArrayBuffer ? bytes : new Uint8Array(bytes).buffer;
+  return new Blob([buf], { type: "image/png" });
 }

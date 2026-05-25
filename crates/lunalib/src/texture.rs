@@ -58,6 +58,7 @@ impl TexFormat {
         match b {
             // ── Low range — Resistance 2 / older path via assetlookup.dat ──
             0x03 => TexFormat::R5G6B5,
+            0x04 => TexFormat::Rgb5A1,
             0x05 => TexFormat::A8R8G8B8,
             0x06 => TexFormat::Dxt1,
             0x07 => TexFormat::Dxt3,
@@ -486,6 +487,15 @@ fn decode_rgba4_morton(raw: &[u8], width: u32, height: u32) -> Vec<u8> {
         rgba[dst + 3] = (a4 << 4) | a4;
     }
     rgba
+}
+
+pub fn decode_image_file_to_png(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let img = image::open(path)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let mut out = Vec::with_capacity(64 * 1024);
+    img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    Ok(out)
 }
 
 pub fn encode_png(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {

@@ -6,12 +6,13 @@ import { Modal } from "./Modal";
 import { Button } from "../ui";
 import { useFileDrop } from "../useFileDrop";
 import { psarcExtractStream } from "../api";
+import { R2Wizard } from "./R2Wizard";
 
 interface OpenLevelModalProps {
   open: boolean;
   busy: boolean;
   onClose: () => void;
-  onOpen: (folderPath: string) => void;
+  onOpen: (folderPath: string, opts?: { skipCachePrompt?: boolean }) => void;
 }
 
 type GameId = "r1" | "r2" | "r3" | "rc_tod" | "rc_acit" | "rc_ffa" | "rc_a4o";
@@ -295,6 +296,7 @@ export function OpenLevelModal({
 }: OpenLevelModalProps) {
   const [step, setStep] = useState<Step>("game");
   const [game, setGame] = useState<GameId | null>(null);
+  const [r2WizardOpen, setR2WizardOpen] = useState(false);
   const [path, setPath] = useState("");
   const [warning, setWarning] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
@@ -320,6 +322,7 @@ export function OpenLevelModal({
       setPsarcError(null);
       setPsarcProgress(null);
       setPsarcDone(false);
+      setR2WizardOpen(false);
     }
   }, [open]);
 
@@ -338,6 +341,10 @@ export function OpenLevelModal({
     setPsarcError(null);
     setPsarcProgress(null);
     setPsarcDone(false);
+    if (id === "r2") {
+      setR2WizardOpen(true);
+      return;
+    }
     setStep("source");
   }, []);
 
@@ -618,6 +625,23 @@ export function OpenLevelModal({
     }
     setStep("folder");
   }, [psarcOutput]);
+
+  if (r2WizardOpen) {
+    return (
+      <R2Wizard
+        open={open}
+        busy={busy}
+        onClose={() => {
+          setR2WizardOpen(false);
+          onClose();
+        }}
+        onOpen={(folder, opts) => {
+          pushRecent("r2", folder);
+          onOpen(folder, opts);
+        }}
+      />
+    );
+  }
 
   return (
     <Modal

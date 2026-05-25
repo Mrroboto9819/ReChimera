@@ -70,20 +70,26 @@ pub fn find_global_tuid_roots(level_folder: &Path) -> Vec<PathBuf> {
                 let tuids = parent.join("built").join("tuids");
                 if tuids.is_dir() {
                     out.push(tuids);
-                } else if parent.is_dir() {
-                    // Folder exists but lacks the built/tuids/ tree — the
-                    // PSARC was probably not extracted (or extracted only
-                    // partially: e.g. just the .toc + sound dir, no
-                    // texture buckets). Flag it so the user knows that's
-                    // why some textures may be missing — we're not just
-                    // silently giving up.
+                } else if parent.join("built").is_dir() {
+                    // Why: parent has a `built/` tree but no `built/tuids/`
+                    // inside it — that's a real partial extraction (the
+                    // PSARC produced the built/ root but the tuid buckets
+                    // are missing or got deleted). Worth flagging because
+                    // texture fallback won't recover.
+                    //
+                    // We deliberately do NOT flag when `parent.is_dir()`
+                    // alone is true — in R2 the `global_uncached.psarc`
+                    // ships only `packed/<toc>` + `sound/global/` (no
+                    // `built/` at all), so its folder existing without
+                    // `built/tuids/` is the PSARC's normal layout, not a
+                    // missing extraction. Nagging there was a false alarm.
                     let psarc_hint = p
                         .join("game")
                         .join(format!("{variant}.psarc"));
                     if psarc_hint.is_file() {
                         eprintln!(
-                            "[global-tex] HINT: {} exists but has no built/tuids/ tree. \
-                             Extract {} to enable cross-level texture fallback for shared art \
+                            "[global-tex] HINT: {} has a built/ tree but no built/tuids/. \
+                             Re-extract {} to repair cross-level texture fallback for shared art \
                              (weapons / characters / UI).",
                             parent.display(),
                             psarc_hint.display(),
@@ -306,6 +312,66 @@ pub fn discover_and_index(level_folder: &Path) -> HashMap<u32, GlobalTextureEntr
             .join(", "),
     );
     index
+}
+
+/// Find sibling level folders extracted under the same `packed/levels/`
+/// root, suitable for cross-level texture fallback. R2 ships shared art
+/// (lobby UI, coop/MP overlays, weapon variants) inside individual level
+/// PSARCs rather than the globals — meshes in `scotia_coop` legitimately
+/// reference texture IDs that only exist in `lobby/level_cached.psarc`
+/// (or another extracted level). When those textures aren't in the
+/// global TUID tree either, the only way to recover them without
+/// teaching the user to dump every PSARC is to read from sibling level
+/// folders the user has already extracted.
+///
+/// Returns the canonical inner level dir for each sibling
+/// (`.../packed/levels/<id>/built/levels/<id>/`), which is what
+/// `bulk_extract_pngs` expects as its `level_folder` argument. Excludes
+/// the caller's own level (compared by canonical path) so we don't
+/// recurse on ourselves. Empty vec if no sibling tree is reachable.
+pub fn find_sibling_extracted_levels(level_folder: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let self_canon = level_folder.canonicalize().ok();
+    let mut cur = Some(level_folder);
+    while let Some(p) = cur {
+        let is_levels_dir = p
+            .file_name()
+            .map(|n| n == "levels")
+            .unwrap_or(false)
+            && p.parent()
+                .and_then(|gp| gp.file_name())
+                .map(|n| n == "packed")
+                .unwrap_or(false);
+        if is_levels_dir {
+            let it = match std::fs::read_dir(p) {
+                Ok(it) => it,
+                Err(_) => break,
+            };
+            for entry in it.flatten() {
+                let folder = entry.path();
+                if !folder.is_dir() {
+                    continue;
+                }
+                let Some(name) = folder.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                let sibling_level_path =
+                    folder.join("built").join("levels").join(name);
+                if !sibling_level_path.join("assetlookup.dat").is_file() {
+                    continue;
+                }
+                if let Some(ref self_c) = self_canon {
+                    if sibling_level_path.canonicalize().ok().as_ref() == Some(self_c) {
+                        continue;
+                    }
+                }
+                out.push(sibling_level_path);
+            }
+            break;
+        }
+        cur = p.parent();
+    }
+    out
 }
 
 /// Verify the suspected texture in this folder really is the one with id

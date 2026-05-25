@@ -22,7 +22,8 @@
     "hierarchy": "Иерархия",
     "inspector": "Инспектор",
     "console": "Консоль",
-    "viewport": "Вьюпорт"
+    "viewport": "Вьюпорт",
+    "assetWorkbench": "Asset"
   },
   "tabs": {
     "dropMove": "Переместить в эту панель",

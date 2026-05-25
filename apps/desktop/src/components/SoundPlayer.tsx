@@ -1,35 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
 import type { ExtractedSound } from "../api";
 
 interface SoundPlayerProps {
-  
-
-
+  /** Null = render the empty placeholder. Set = bind to that audio. */
   nowPlaying: NowPlaying | null;
-  
-  onClose: () => void;
-  
+
   onLog?: (level: "info" | "ok" | "warn" | "error", text: string) => void;
 }
 
 export interface NowPlaying {
-  
   name: string;
-  
-
   source: string;
-  
-
-
-
   audio: HTMLAudioElement;
-  
-
   blobUrl: string;
-  
-
   entry: ExtractedSound;
 }
 
@@ -41,33 +24,45 @@ function fmtTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+// Why: volume is a personal-preference setting that should persist across
+// app launches AND apply to every track the user plays in this session.
+// Keeping it in localStorage means the next-loaded audio element inherits
+// the user's last choice without them touching the slider again.
+const VOLUME_STORAGE_KEY = "rechimera.soundPlayerVolume";
 
+function loadStoredVolume(): number {
+  try {
+    const v = localStorage.getItem(VOLUME_STORAGE_KEY);
+    if (v == null) return 1;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 1;
+  } catch {
+    return 1;
+  }
+}
 
+function storeVolume(v: number): void {
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(v));
+  } catch {
+    /* ignore quota / disabled storage */
+  }
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-export function SoundPlayer({ nowPlaying, onClose, onLog }: SoundPlayerProps) {
+export function SoundPlayer({ nowPlaying, onLog }: SoundPlayerProps) {
   const [paused, setPaused] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [exporting, setExporting] = useState(false);
-  
-  
-  
-  const seekingRef = useRef(false);
+  const [volume, setVolume] = useState<number>(() => loadStoredVolume());
 
+  const seekingRef = useRef(false);
   const audio = nowPlaying?.audio ?? null;
+
+  // Every time a new audio element comes in, inherit the user's
+  // persisted volume immediately — no waiting for the slider event.
+  useEffect(() => {
+    if (audio) audio.volume = volume;
+  }, [audio, volume]);
 
   useEffect(() => {
     if (!audio) {
@@ -86,21 +81,16 @@ export function SoundPlayer({ nowPlaying, onClose, onLog }: SoundPlayerProps) {
       setPaused(true);
       setCurrentTime(0);
     };
-    const onVolumeChange = () => setVolume(audio.volume);
 
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("durationchange", onDurationChange);
     audio.addEventListener("ended", onEnded);
-    audio.addEventListener("volumechange", onVolumeChange);
 
-    
-    
     setPaused(audio.paused);
     setCurrentTime(audio.currentTime);
     setDuration(audio.duration || 0);
-    setVolume(audio.volume);
 
     return () => {
       audio.removeEventListener("play", onPlay);
@@ -108,11 +98,8 @@ export function SoundPlayer({ nowPlaying, onClose, onLog }: SoundPlayerProps) {
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("durationchange", onDurationChange);
       audio.removeEventListener("ended", onEnded);
-      audio.removeEventListener("volumechange", onVolumeChange);
     };
   }, [audio]);
-
-  if (!nowPlaying) return null;
 
   const togglePlay = () => {
     if (!audio) return;
@@ -135,69 +122,44 @@ export function SoundPlayer({ nowPlaying, onClose, onLog }: SoundPlayerProps) {
   };
 
   const onVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!audio) return;
     const v = Number(e.target.value);
-    audio.volume = v;
-  };
-
-  const handleExport = async () => {
-    if (!nowPlaying || exporting) return;
-    setExporting(true);
-    try {
-      
-      
-      
-      const stem = nowPlaying.name
-        .replace(/[\\/:*?"<>|]/g, "_")
-        .replace(/\s+/g, "_")
-        .slice(0, 80) || "sound";
-      const path = await save({
-        title: "Export sound as WAV",
-        defaultPath: `${stem}.wav`,
-        filters: [{ name: "WAVE audio", extensions: ["wav"] }],
-      });
-      if (typeof path !== "string") {
-        onLog?.("info", "Sound export cancelled");
-        return;
-      }
-      
-      const bin = atob(nowPlaying.entry.wav_b64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      await invoke<void>("write_bytes", {
-        path,
-        bytes: Array.from(bytes),
-      });
-      onLog?.(
-        "ok",
-        `Exported ${stem}.wav (${(bytes.length / 1024).toFixed(1)} KB)`,
-      );
-    } catch (e) {
-      onLog?.("error", `Sound export failed: ${e}`);
-    } finally {
-      setExporting(false);
-    }
+    setVolume(v);
+    storeVolume(v);
+    if (audio) audio.volume = v;
   };
 
   const progressMax = duration > 0 ? duration : 1;
-  const channels = nowPlaying.entry.channels;
-  const channelLabel =
-    channels === 1 ? "mono" : channels === 2 ? "stereo" : `${channels}ch`;
-  const meta = `${nowPlaying.source} · ${channelLabel} · ${nowPlaying.entry.sample_rate} Hz`;
+  const isEmpty = !nowPlaying;
+  const channels = nowPlaying?.entry.channels ?? 0;
+  const channelLabel = isEmpty
+    ? ""
+    : channels === 1
+      ? "mono"
+      : channels === 2
+        ? "stereo"
+        : `${channels}ch`;
+  const meta = isEmpty
+    ? "Select a sound to play"
+    : `${nowPlaying!.source} · ${channelLabel} · ${nowPlaying!.entry.sample_rate} Hz`;
 
   return (
-    <div className="sound-player" role="region" aria-label="Sound player">
+    <div
+      className={`sound-player ${isEmpty ? "empty" : ""}`}
+      role="region"
+      aria-label="Sound player"
+    >
       <button
         type="button"
         className="sp-toggle"
         onClick={togglePlay}
-        title={paused ? "Play" : "Pause"}
+        disabled={isEmpty}
+        title={isEmpty ? "Nothing loaded" : paused ? "Play" : "Pause"}
       >
         {paused ? "▶" : "❚❚"}
       </button>
       <div className="sp-info">
-        <div className="sp-name" title={nowPlaying.name}>
-          {nowPlaying.name}
+        <div className="sp-name" title={nowPlaying?.name ?? ""}>
+          {nowPlaying?.name ?? <span className="dim">—</span>}
         </div>
         <div className="sp-meta" title={meta}>
           {meta}
@@ -214,7 +176,7 @@ export function SoundPlayer({ nowPlaying, onClose, onLog }: SoundPlayerProps) {
         onChange={onSeek}
         onMouseUp={onSeekEnd}
         onTouchEnd={onSeekEnd}
-        disabled={!Number.isFinite(duration) || duration === 0}
+        disabled={isEmpty || !Number.isFinite(duration) || duration === 0}
       />
       <span className="sp-time mono small">{fmtTime(duration)}</span>
       <span className="sp-volume-icon" aria-hidden>
@@ -228,26 +190,8 @@ export function SoundPlayer({ nowPlaying, onClose, onLog }: SoundPlayerProps) {
         step={0.01}
         value={volume}
         onChange={onVolume}
-        title={`Volume ${Math.round(volume * 100)}%`}
+        title={`Volume ${Math.round(volume * 100)}% (shared across all sounds)`}
       />
-      <button
-        type="button"
-        className="sp-action"
-        onClick={handleExport}
-        disabled={exporting}
-        title="Save as .wav"
-      >
-        {exporting ? "…" : "⤓"}
-      </button>
-      <button
-        type="button"
-        className="sp-close"
-        onClick={onClose}
-        title="Close player"
-        aria-label="Close player"
-      >
-        ×
-      </button>
     </div>
   );
 }
