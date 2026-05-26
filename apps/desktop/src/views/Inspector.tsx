@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Instance, LevelMeshes, TextureBlobMap } from "../api";
 import { AssetPreview } from "./AssetPreview";
 import type { useEdits } from "../edits";
-import { Crosshair, Download, RefreshCw } from "lucide-react";
+import { Crosshair, Download, Maximize2, RefreshCw } from "lucide-react";
 import { Button, NumberInput } from "../ui";
 
 type Edits = ReturnType<typeof useEdits>;
@@ -32,6 +32,8 @@ interface InspectorProps {
 
 
   onFocusSelected?: () => void;
+  /** Open the currently-selected asset in the AssetWorkbench center tab. */
+  onOpenInWorkbench?: (assetTuidHex: string, kind: "moby" | "tie") => void;
 }
 
 
@@ -85,6 +87,7 @@ export function Inspector({
   onLoadMeshes,
   loadingMeshes = false,
   onFocusSelected,
+  onOpenInWorkbench,
 }: InspectorProps) {
   const [exporting, setExporting] = useState(false);
 
@@ -212,6 +215,24 @@ export function Inspector({
           >
             Go to
           </Button>
+          {(selected?.kind === "moby" || selected?.kind === "tie") && (
+            <Button
+              icon={Maximize2}
+              onClick={() => {
+                if (!selected || !onOpenInWorkbench) return;
+                const tuid = selected.asset_tuid.split("#")[0];
+                if (!tuid) return;
+                onOpenInWorkbench(
+                  tuid,
+                  selected.kind as "moby" | "tie",
+                );
+              }}
+              disabled={!onOpenInWorkbench}
+              title="Open this asset in the Asset workbench center tab"
+            >
+              View model
+            </Button>
+          )}
           {needsMeshes && (
             <Button
               variant="primary"

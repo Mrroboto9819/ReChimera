@@ -7,6 +7,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
+import { useAppSelector, getAppSkin } from "../store";
+import { useUiSound } from "../useUiSound";
 
 interface ModalProps {
   
@@ -69,14 +71,26 @@ export function Modal({
   bodyClassName,
   children,
 }: ModalProps) {
+  const appSkin = useAppSelector((s) => s.settings.appSkin);
+  const skinDef = getAppSkin(appSkin);
+  const modalClass = skinDef.modalClass;
+  const isHud = modalClass === "modal-dialog--hud";
   const backdropRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const play = useUiSound();
+  const prevOpenRef = useRef(open);
   
   
   const tlRef = useRef<gsap.core.Timeline | null>(null);
 
   
   
+  useEffect(() => {
+    if (prevOpenRef.current === open) return;
+    prevOpenRef.current = open;
+    play(open ? "modal-open" : "back");
+  }, [open, play]);
+
   useLayoutEffect(() => {
     const backdrop = backdropRef.current;
     const dialog = dialogRef.current;
@@ -162,12 +176,20 @@ export function Modal({
     >
       <div
         ref={dialogRef}
-        className="modal-dialog"
+        className={`modal-dialog${modalClass ? ` ${modalClass}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? "modal-title" : undefined}
         style={{ width: SIZE_WIDTH[size] }}
       >
+        {isHud && (
+          <>
+            <span className="hud-corner hud-corner--tl" />
+            <span className="hud-corner hud-corner--tr" />
+            <span className="hud-corner hud-corner--bl" />
+            <span className="hud-corner hud-corner--br" />
+          </>
+        )}
         {(title || dismissable) && (
           <header className="modal-header">
             <div className="modal-header-text">
@@ -184,6 +206,7 @@ export function Modal({
                 className="modal-close"
                 onClick={() => onClose?.()}
                 aria-label="Close"
+                data-no-sound
               >
                 ×
               </button>

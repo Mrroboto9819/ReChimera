@@ -22,7 +22,8 @@
     "hierarchy": "Hiérarchie",
     "inspector": "Inspecteur",
     "console": "Console",
-    "viewport": "Vue 3D"
+    "viewport": "Vue 3D",
+    "assetWorkbench": "Asset"
   },
   "tabs": {
     "dropMove": "Déplacer vers ce panneau",

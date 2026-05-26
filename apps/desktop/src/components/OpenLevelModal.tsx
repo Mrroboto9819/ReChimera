@@ -3,15 +3,21 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, Archive, File, Folder, Package, Lock, X } from "lucide-react";
 import gsap from "gsap";
 import { Modal } from "./Modal";
+import {
+  FallbackImage,
+  franchisePlaceholder,
+  levelThumbCandidatesFromPath,
+} from "./FallbackImage";
 import { Button } from "../ui";
 import { useFileDrop } from "../useFileDrop";
 import { psarcExtractStream } from "../api";
+import { R2Wizard } from "./R2Wizard";
 
 interface OpenLevelModalProps {
   open: boolean;
   busy: boolean;
   onClose: () => void;
-  onOpen: (folderPath: string) => void;
+  onOpen: (folderPath: string, opts?: { skipCachePrompt?: boolean }) => void;
 }
 
 type GameId = "r1" | "r2" | "r3" | "rc_tod" | "rc_acit" | "rc_ffa" | "rc_a4o";
@@ -267,6 +273,7 @@ function lastTwoSegments(path: string): string {
   return parts.slice(-2).join(" / ") || norm;
 }
 
+
 const FRANCHISE_TAB_KEY = "rechimera.wizardFranchiseTab";
 
 function loadFranchiseTab(): Franchise {
@@ -295,6 +302,7 @@ export function OpenLevelModal({
 }: OpenLevelModalProps) {
   const [step, setStep] = useState<Step>("game");
   const [game, setGame] = useState<GameId | null>(null);
+  const [r2WizardOpen, setR2WizardOpen] = useState(false);
   const [path, setPath] = useState("");
   const [warning, setWarning] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
@@ -320,6 +328,7 @@ export function OpenLevelModal({
       setPsarcError(null);
       setPsarcProgress(null);
       setPsarcDone(false);
+      setR2WizardOpen(false);
     }
   }, [open]);
 
@@ -338,6 +347,22 @@ export function OpenLevelModal({
     setPsarcError(null);
     setPsarcProgress(null);
     setPsarcDone(false);
+    // The USRDIR wizard handles any Insomniac game whose USRDIR layout
+    // matches `packed/game/` + `packed/levels/<level>/` — that's both V2
+    // (R2/R3/ACiT/A4O/FFA, assetlookup.dat marker) and RFOM
+    // (ps3levelmain.dat marker). The per-game ready filename is passed
+    // down via the wizard's `entryFile` prop. ToD's `main.dat` layout
+    // is different (no per-level psarc tree) so it still uses the
+    // generic folder picker.
+    const spec = GAMES.find((g) => g.id === id);
+    const wizardEligible =
+      spec?.supported &&
+      (spec.entryFile === "assetlookup.dat" ||
+        spec.entryFile === "ps3levelmain.dat");
+    if (wizardEligible) {
+      setR2WizardOpen(true);
+      return;
+    }
     setStep("source");
   }, []);
 
@@ -618,6 +643,29 @@ export function OpenLevelModal({
     }
     setStep("folder");
   }, [psarcOutput]);
+
+  if (r2WizardOpen && game) {
+    const wizardSpec = GAMES.find((g) => g.id === game);
+    const wizardLabel = wizardSpec?.short ?? "R2";
+    const wizardEntryFile = wizardSpec?.entryFile ?? "assetlookup.dat";
+    return (
+      <R2Wizard
+        open={open}
+        busy={busy}
+        gameId={game}
+        gameLabel={wizardLabel}
+        entryFile={wizardEntryFile}
+        onClose={() => {
+          setR2WizardOpen(false);
+          onClose();
+        }}
+        onOpen={(folder, opts) => {
+          pushRecent(game, folder);
+          onOpen(folder, opts);
+        }}
+      />
+    );
+  }
 
   return (
     <Modal
@@ -1142,7 +1190,11 @@ export function OpenLevelModal({
             <div className="open-level-recent">
               <div className="open-level-section-title small dim">Recent</div>
               <ul className="open-level-recent-list">
-                {recent.map((folder) => (
+                {recent.map((folder) => {
+                  const candidates = game
+                    ? levelThumbCandidatesFromPath(folder, game)
+                    : [];
+                  return (
                   <li key={folder} className="open-level-recent-item">
                     <button
                       type="button"
@@ -1151,6 +1203,13 @@ export function OpenLevelModal({
                       disabled={busy}
                       title={folder}
                     >
+                      <FallbackImage
+                        candidates={candidates}
+                        alt=""
+                        className="open-level-recent-thumb"
+                        placeholder={game ? franchisePlaceholder(game) : undefined}
+                        placeholderLabel="No image"
+                      />
                       <span className="open-level-recent-name">
                         {lastTwoSegments(folder)}
                       </span>
@@ -1168,7 +1227,8 @@ export function OpenLevelModal({
                       <X size={14} strokeWidth={2} />
                     </button>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
           )}

@@ -22,7 +22,8 @@
     "hierarchy": "层级",
     "inspector": "检查器",
     "console": "控制台",
-    "viewport": "视口"
+    "viewport": "视口",
+    "assetWorkbench": "Asset"
   },
   "tabs": {
     "dropMove": "移动到此面板",

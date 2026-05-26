@@ -157,7 +157,12 @@ export const {
 } = layoutSlice.actions;
 
 export type PanelId = "left" | "right" | "bottom" | "center";
-export type ViewId = "hierarchy" | "inspector" | "console" | "viewport";
+export type ViewId =
+  | "hierarchy"
+  | "inspector"
+  | "console"
+  | "viewport"
+  | "assetWorkbench";
 
 export interface PanelLayout {
   tabs: ViewId[];
@@ -270,6 +275,78 @@ export const {
 
 export type ThemeMode = "dark" | "light";
 
+/** A skin is an app-wide visual theme. Anyone can register a new one by
+ *  pushing into `APP_SKINS` and shipping a CSS block scoped to
+ *  `:root[data-app-skin="<id>"]`. The runtime applies the attribute on
+ *  the document root; CSS does the rest. */
+export type AppSkin = string;
+
+export interface AppSkinDef {
+  /** Stable id used as the `data-app-skin` attribute value. */
+  id: AppSkin;
+  /** Display label shown in Settings. */
+  label: string;
+  /** Color modes this skin supports. Dark-only skins (e.g. Resistance 2)
+   *  list just ["dark"]; the runtime auto-snaps mode to the first allowed
+   *  entry on switch. */
+  allowedModes: ThemeMode[];
+  /** Optional class added to `.modal-dialog` when this skin is active.
+   *  Skins that fit inside the default modal shell can leave this empty. */
+  modalClass?: string;
+  /** One-line description shown under the skin label in Settings. */
+  description?: string;
+  /** When set, the runtime forces this color as the brand/primary while
+   *  this skin is active, overriding the user's brand-color setting.
+   *  Use for branded skins where the palette is part of the identity
+   *  (e.g. Resistance 2's amber). */
+  primaryColor?: string;
+}
+
+export const APP_SKINS: AppSkinDef[] = [
+  {
+    id: "default",
+    label: "Default",
+    allowedModes: ["dark", "light"],
+    description: "The standard ReChimera look — light and dark variants.",
+  },
+  {
+    id: "resistance2",
+    label: "Resistance 2",
+    allowedModes: ["dark"],
+    modalClass: "modal-dialog--hud",
+    description: "Amber HUD inspired by the Resistance 2 pause menu. Dark only.",
+    primaryColor: "#d4b860",
+  },
+  {
+    id: "resistance3",
+    label: "Resistance 3",
+    allowedModes: ["light"],
+    modalClass: "modal-dialog--journal",
+    description: "Aged-paper wartime journal — sepia, charcoal ink, deep red accents.",
+    primaryColor: "#8a1f1f",
+  },
+  {
+    id: "resistance1",
+    label: "Resistance: Fall of Man",
+    allowedModes: ["dark"],
+    modalClass: "modal-dialog--metal",
+    description: "Wartime industrial — rusted metal frame, olive panels, cream-yellow text.",
+    primaryColor: "#dcc878",
+  },
+  {
+    id: "racit",
+    label: "R&C: A Crack in Time",
+    allowedModes: ["dark"],
+    modalClass: "modal-dialog--cosmic",
+    description: "Cosmic navy with warm orange highlights — clean sci-fi inspired look.",
+    primaryColor: "#f0a830",
+  },
+];
+
+export function getAppSkin(id: AppSkin): AppSkinDef {
+  return APP_SKINS.find((s) => s.id === id) ?? APP_SKINS[0]!;
+}
+
 export type Language = "en" | "es" | "fr" | "zh" | "ru";
 
 export interface AssetColors {
@@ -300,14 +377,20 @@ export interface AssetColors {
 
 export interface SettingsState {
   theme: ThemeMode;
+  appSkin: AppSkin;
   brandColor: string;
   assetColors: AssetColors;
   language: Language;
+  uiSoundEnabled: boolean;
+  uiSoundVolume: number;
 }
 
 const DEFAULT_SETTINGS: SettingsState = {
   theme: "dark",
+  appSkin: "default",
   brandColor: "#FF6363",
+  uiSoundEnabled: true,
+  uiSoundVolume: 0.6,
   assetColors: {
     moby: "#ff8a3d",
     tie: "#3dd0ff",
@@ -329,10 +412,26 @@ const settingsSlice = createSlice({
   initialState: DEFAULT_SETTINGS,
   reducers: {
     setTheme(state, action: PayloadAction<ThemeMode>) {
-      state.theme = action.payload;
+      const allowed = getAppSkin(state.appSkin).allowedModes;
+      state.theme = allowed.includes(action.payload) ? action.payload : (allowed[0] ?? "dark");
     },
     toggleTheme(state) {
+      const allowed = getAppSkin(state.appSkin).allowedModes;
+      if (allowed.length < 2) return;
       state.theme = state.theme === "dark" ? "light" : "dark";
+    },
+    setAppSkin(state, action: PayloadAction<AppSkin>) {
+      state.appSkin = action.payload;
+      const allowed = getAppSkin(action.payload).allowedModes;
+      if (!allowed.includes(state.theme)) {
+        state.theme = allowed[0] ?? "dark";
+      }
+    },
+    setUiSoundEnabled(state, action: PayloadAction<boolean>) {
+      state.uiSoundEnabled = action.payload;
+    },
+    setUiSoundVolume(state, action: PayloadAction<number>) {
+      state.uiSoundVolume = Math.max(0, Math.min(1, action.payload));
     },
     setBrandColor(state, action: PayloadAction<string>) {
       state.brandColor = action.payload;
@@ -355,9 +454,12 @@ const settingsSlice = createSlice({
 export const {
   setTheme,
   toggleTheme,
+  setAppSkin,
   setBrandColor,
   setAssetColor,
   setLanguage,
+  setUiSoundEnabled,
+  setUiSoundVolume,
   resetSettings,
 } = settingsSlice.actions;
 

@@ -640,45 +640,25 @@ fn build_material(
 ) -> Option<u32> {
     let &shader_tuid = shader_tuids.get(shader_index)?;
     let shader = shaders.get(&shader_tuid)?;
-    let albedo_id = shader.albedo_tex_id?;
-    let png_bytes = textures.get(&albedo_id)?;
-    if png_bytes.is_empty() {
+
+    let albedo_idx = shader
+        .albedo_tex_id
+        .and_then(|id| push_or_reuse_texture(bin, views, images, gltf_textures, image_idx_by_tex_id, textures, id));
+    let normal_idx = shader
+        .normal_tex_id
+        .and_then(|id| push_or_reuse_texture(bin, views, images, gltf_textures, image_idx_by_tex_id, textures, id));
+    let emissive_idx = shader
+        .expensive_tex_id
+        .and_then(|id| push_or_reuse_texture(bin, views, images, gltf_textures, image_idx_by_tex_id, textures, id));
+
+    if albedo_idx.is_none() && normal_idx.is_none() && emissive_idx.is_none() {
         return None;
     }
 
-    let image_idx = match image_idx_by_tex_id.get(&albedo_id) {
-        Some(&idx) => idx,
-        None => {
-
-            let view = push_buffer_view(bin, views, png_bytes);
-            images.push(gltf_json::Image {
-                buffer_view: Some(Index::new(view)),
-                mime_type: Some(gltf_json::image::MimeType("image/png".into())),
-                name: Some(format!("tex_{albedo_id}")),
-                uri: None,
-                extensions: Default::default(),
-                extras: Default::default(),
-            });
-            let img_idx = (images.len() - 1) as u32;
-
-            gltf_textures.push(gltf_json::Texture {
-                name: Some(format!("tex_{albedo_id}")),
-                sampler: None,
-                source: Index::new(img_idx),
-                extensions: Default::default(),
-                extras: Default::default(),
-            });
-            image_idx_by_tex_id.insert(albedo_id, img_idx);
-            img_idx
-        }
-    };
-
-    let texture_idx = image_idx;
-
-    let mut pbr = gltf_json::material::PbrMetallicRoughness {
+    let pbr = gltf_json::material::PbrMetallicRoughness {
         base_color_factor: gltf_json::material::PbrBaseColorFactor([1.0, 1.0, 1.0, 1.0]),
-        base_color_texture: Some(gltf_json::texture::Info {
-            index: Index::new(texture_idx),
+        base_color_texture: albedo_idx.map(|idx| gltf_json::texture::Info {
+            index: Index::new(idx),
             tex_coord: 0,
             extensions: Default::default(),
             extras: Default::default(),
@@ -690,23 +670,86 @@ fn build_material(
         extras: Default::default(),
     };
 
-    pbr.metallic_roughness_texture = pbr.metallic_roughness_texture.take();
+    let normal_texture = normal_idx.map(|idx| gltf_json::material::NormalTexture {
+        index: Index::new(idx),
+        scale: 1.0,
+        tex_coord: 0,
+        extensions: Default::default(),
+        extras: Default::default(),
+    });
+    let emissive_texture = emissive_idx.map(|idx| gltf_json::texture::Info {
+        index: Index::new(idx),
+        tex_coord: 0,
+        extensions: Default::default(),
+        extras: Default::default(),
+    });
+    // Why: the third texture slot Insomniac calls "expensive" isn't a pure
+    // PBR emissive map — it carries full-color spec/detail data that blows
+    // out the albedo when multiplied at full strength. Export the map (so
+    // downstream tools like Blender / Unreal still receive it) but keep
+    // its contribution at zero in the GLB so albedo stays dominant in the
+    // preview. Re-enable per-shader once we figure out which R2 shaders
+    // actually want emission vs. spec / detail.
+    let emissive_factor = gltf_json::material::EmissiveFactor([0.0, 0.0, 0.0]);
+
+    let name = format!(
+        "mat_a{}_n{}_e{}",
+        shader.albedo_tex_id.map(|i| i.to_string()).unwrap_or_else(|| "_".into()),
+        shader.normal_tex_id.map(|i| i.to_string()).unwrap_or_else(|| "_".into()),
+        shader.expensive_tex_id.map(|i| i.to_string()).unwrap_or_else(|| "_".into()),
+    );
 
     materials.push(gltf_json::Material {
         alpha_cutoff: None,
         alpha_mode: Checked::Valid(gltf_json::material::AlphaMode::Opaque),
         double_sided: false,
-        name: Some(format!("mat_albedo_{albedo_id}")),
+        name: Some(name),
         pbr_metallic_roughness: pbr,
-        normal_texture: None,
+        normal_texture,
         occlusion_texture: None,
-        emissive_texture: None,
-        emissive_factor: gltf_json::material::EmissiveFactor([0.0, 0.0, 0.0]),
+        emissive_texture,
+        emissive_factor,
         extensions: Default::default(),
         extras: Default::default(),
     });
-    let _ = image_idx;
     Some((materials.len() - 1) as u32)
+}
+
+fn push_or_reuse_texture(
+    bin: &mut Vec<u8>,
+    views: &mut Vec<gltf_json::buffer::View>,
+    images: &mut Vec<gltf_json::Image>,
+    gltf_textures: &mut Vec<gltf_json::Texture>,
+    image_idx_by_tex_id: &mut HashMap<u32, u32>,
+    textures: &HashMap<u32, Vec<u8>>,
+    tex_id: u32,
+) -> Option<u32> {
+    if let Some(&idx) = image_idx_by_tex_id.get(&tex_id) {
+        return Some(idx);
+    }
+    let png_bytes = textures.get(&tex_id)?;
+    if png_bytes.is_empty() {
+        return None;
+    }
+    let view = push_buffer_view(bin, views, png_bytes);
+    images.push(gltf_json::Image {
+        buffer_view: Some(Index::new(view)),
+        mime_type: Some(gltf_json::image::MimeType("image/png".into())),
+        name: Some(format!("tex_{tex_id}")),
+        uri: None,
+        extensions: Default::default(),
+        extras: Default::default(),
+    });
+    let img_idx = (images.len() - 1) as u32;
+    gltf_textures.push(gltf_json::Texture {
+        name: Some(format!("tex_{tex_id}")),
+        sampler: None,
+        source: Index::new(img_idx),
+        extensions: Default::default(),
+        extras: Default::default(),
+    });
+    image_idx_by_tex_id.insert(tex_id, img_idx);
+    Some(img_idx)
 }
 
 fn push_buffer_view(

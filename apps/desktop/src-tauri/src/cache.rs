@@ -564,6 +564,7 @@ fn decode_clips_for_moby(
     animset_hash: u64,
     position_scale: f32,
     scale_scale: f32,
+    skel_bones: u16,
 ) -> Vec<DecodedClip> {
     let Some(&(offset, length)) = index.by_hash.get(&animset_hash) else {
         return Vec::new();
@@ -585,8 +586,15 @@ fn decode_clips_for_moby(
     };
     let offsets = animation_section_offsets(&ig);
     let mut out = Vec::with_capacity(offsets.len());
+    let debug_this = animset_matches_debug_env(animset_hash);
+    if debug_this {
+        eprintln!(
+            "[anim-debug] === animset 0x{animset_hash:016X} ({} clips, skel_bones={skel_bones}) ===",
+            offsets.len()
+        );
+    }
     for (i, off) in offsets.into_iter().enumerate() {
-        let header = match read_animation_header_at(&mut ig, off) {
+        let mut header = match read_animation_header_at(&mut ig, off) {
             Ok(h) => h,
             Err(e) => {
                 eprintln!(
@@ -595,6 +603,40 @@ fn decode_clips_for_moby(
                 continue;
             }
         };
+        let raw_num_bones = header.num_bones;
+        let raw_stride = header.frame_stride;
+        // Additive `numBones` override — IT's LoadAnimations
+        // (gltf_shared.cpp ~542) overwrites the clip's stored numBones with
+        // the skeleton's full bone count BEFORE reading any control-blob
+        // section. The control blob's section offsets are computed as
+        // `numBones * 8 + padding`, so the on-disk layout uses the canonical
+        // (max) bone count across the animset, not the per-clip annotation.
+        // Without this override, track-mask and blend-mask reads land in
+        // garbage and bone_index values overflow past skel_bones.
+        if header.is_additive() && skel_bones > 0 {
+            header.num_bones = skel_bones;
+        }
+        header.apply_frame_stride_padding();
+        if debug_this {
+            eprintln!(
+                "[anim-debug] clip[{i:3}] '{}' flags=0x{:04X} (L={} A={} P={}) nb={}->{} nf={} stride={}->{} n16={} n8={} nrv={} frames@0x{:08X} ctrl@0x{:08X}",
+                header.name,
+                header.flags,
+                header.is_looping() as u8,
+                header.is_additive() as u8,
+                header.is_packed_frames() as u8,
+                raw_num_bones,
+                header.num_bones,
+                header.num_frames,
+                raw_stride,
+                header.frame_stride,
+                header.num_16bit_tracks,
+                header.num_8bit_tracks,
+                header.num_reference_values,
+                header.frames_ptr,
+                header.control_ptr,
+            );
+        }
         let ctrl = match read_animation_control(&mut ig, &header) {
             Ok(c) => c,
             Err(e) => {
@@ -605,8 +647,58 @@ fn decode_clips_for_moby(
                 continue;
             }
         };
+        if debug_this {
+            let max_t16_bone = ctrl
+                .track16_masks
+                .iter()
+                .map(|m| m.bone_index)
+                .max()
+                .unwrap_or(0);
+            let max_t8_bone = ctrl
+                .track8_masks
+                .iter()
+                .map(|m| m.bone_index)
+                .max()
+                .unwrap_or(0);
+            eprintln!(
+                "[anim-debug] clip[{i:3}]   ctrl: t16_masks={} (max_bone={}) t8_masks={} (max_bone={}) ref_pose_masks={} blend_masks={}",
+                ctrl.track16_masks.len(),
+                max_t16_bone,
+                ctrl.track8_masks.len(),
+                max_t8_bone,
+                ctrl.ref_pose_masks.len(),
+                ctrl.blend_masks.len(),
+            );
+            if max_t16_bone >= skel_bones || max_t8_bone >= skel_bones {
+                eprintln!(
+                    "[anim-debug] clip[{i:3}]   *** WARN: track-mask bone index >= skel_bones={} (track will be silently dropped)",
+                    skel_bones
+                );
+            }
+        }
+
         match decode_animation(&mut ig, &header, &ctrl, position_scale, scale_scale) {
-            Ok(clip) => out.push(clip),
+            Ok(clip) => {
+                if debug_this {
+                    let animated_rot = clip.bones.iter().filter(|b| b.rotation_animated).count();
+                    let animated_pos = clip.bones.iter().filter(|b| b.translation_animated).count();
+                    let animated_scl = clip.bones.iter().filter(|b| b.scale_animated).count();
+                    let first_rots: Vec<f32> = clip
+                        .bones
+                        .first()
+                        .map(|b| b.rotations.iter().take(8).copied().collect())
+                        .unwrap_or_default();
+                    eprintln!(
+                        "[anim-debug] clip[{i:3}]   decoded: bones={} animated R/P/S={}/{}/{} first_bone_rot[0..8]={:?}",
+                        clip.bones.len(),
+                        animated_rot,
+                        animated_pos,
+                        animated_scl,
+                        first_rots,
+                    );
+                }
+                out.push(clip);
+            }
             Err(e) => {
                 eprintln!(
                     "warn: animset 0x{animset_hash:016X} clip[{i}] '{}' decode failed (level {level_folder:?}): {e}",
@@ -616,6 +708,17 @@ fn decode_clips_for_moby(
         }
     }
     out
+}
+
+fn animset_matches_debug_env(animset_hash: u64) -> bool {
+    let Ok(want) = std::env::var("RECHIMERA_DEBUG_ANIMSET") else {
+        return false;
+    };
+    let want = want.trim().trim_start_matches("0x").trim_start_matches("0X");
+    let Ok(v) = u64::from_str_radix(want, 16) else {
+        return false;
+    };
+    v == animset_hash
 }
 
 fn ensure_dirs(root: &Path) -> Result<(), String> {
@@ -681,6 +784,134 @@ fn debug_moby_filter() -> Option<Vec<String>> {
 fn debug_moby_match(tuid: u64, suffixes: &[String]) -> bool {
     let hex = format!("{:016X}", tuid);
     suffixes.iter().any(|s| hex.ends_with(s.as_str()))
+}
+
+/// Per-submesh shader → texture resolution dump for one moby. Self-gates on
+/// `RECHIMERA_DEBUG_MOBY` matching the tuid suffix — same convention as
+/// `dump_skeleton_bind`. Surfaces:
+///   - the moby's full shader_tuids palette
+///   - per submesh: shader_index → resolved shader_tuid → (albedo, normal,
+///     expensive) texture IDs → whether each texture made it into the
+///     encoded PNG set (✓) or got dropped (MISSING)
+///   - rollup at the end: count of submeshes with a working albedo
+fn dump_moby_shader_textures(
+    asset: &lunalib::MobyAsset,
+    shaders: &HashMap<u64, ShaderInfo>,
+    texture_pngs: &HashMap<u32, Vec<u8>>,
+) {
+    let Some(suffixes) = debug_moby_filter() else {
+        return;
+    };
+    if !debug_moby_match(asset.tuid, &suffixes) {
+        return;
+    }
+    let total_submeshes: usize = asset.bangles.iter().map(|b| b.meshes.len()).sum();
+    let unique_shaders: HashSet<u16> = asset
+        .bangles
+        .iter()
+        .flat_map(|b| b.meshes.iter().map(|m| m.shader_index))
+        .collect();
+    eprintln!(
+        "[moby-tex] === moby_{:016X} '{}' ({} submeshes, {} unique shader indices, palette={}) ===",
+        asset.tuid,
+        asset.name,
+        total_submeshes,
+        unique_shaders.len(),
+        asset.shader_tuids.len(),
+    );
+    // Palette preview — first 12 shader tuids, truncated to lower 32 bits
+    // (full 64-bit tuids drown the line).
+    let palette_preview: Vec<String> = asset
+        .shader_tuids
+        .iter()
+        .take(12)
+        .enumerate()
+        .map(|(i, &t)| format!("{}=0x{:08X}", i, (t & 0xFFFFFFFF) as u32))
+        .collect();
+    let palette_more = asset.shader_tuids.len().saturating_sub(12);
+    eprintln!(
+        "[moby-tex]   shader palette: {}{}",
+        palette_preview.join(", "),
+        if palette_more > 0 {
+            format!(" … (+{} more)", palette_more)
+        } else {
+            String::new()
+        },
+    );
+
+    let mut ok_albedo = 0usize;
+    let mut missing_albedo = 0usize;
+    let mut no_shader = 0usize;
+    let mut submesh_idx = 0usize;
+    for (bangle_idx, bangle) in asset.bangles.iter().enumerate() {
+        for m in &bangle.meshes {
+            let (albedo, normal, expensive) = resolve_shader_textures(
+                shaders,
+                &asset.shader_tuids,
+                m.shader_index as usize,
+            );
+            let shader_tuid = asset
+                .shader_tuids
+                .get(m.shader_index as usize)
+                .copied()
+                .unwrap_or(0);
+            let alb_state = match albedo {
+                None => {
+                    no_shader += 1;
+                    "no-albedo".to_string()
+                }
+                Some(id) if texture_pngs.contains_key(&id) => {
+                    ok_albedo += 1;
+                    format!("OK 0x{:08X}", id)
+                }
+                Some(id) => {
+                    missing_albedo += 1;
+                    format!("MISSING 0x{:08X}", id)
+                }
+            };
+            let nrm_state = match normal {
+                None => "none".to_string(),
+                Some(id) if texture_pngs.contains_key(&id) => format!("0x{:08X}", id),
+                Some(id) => format!("MISSING 0x{:08X}", id),
+            };
+            let exp_state = match expensive {
+                None => "none".to_string(),
+                Some(id) if texture_pngs.contains_key(&id) => format!("0x{:08X}", id),
+                Some(id) => format!("MISSING 0x{:08X}", id),
+            };
+            // Why: R2 shaders use IT's V1 lookup (4 hashes: a / n / s / d).
+            // The detail map (slot 3) is sometimes the only non-zero slot
+            // when slots 0-2 are empty, so surface it here so we can spot
+            // those submeshes in the log.
+            let detail = asset
+                .shader_tuids
+                .get(m.shader_index as usize)
+                .and_then(|t| shaders.get(t))
+                .and_then(|s| s.detail_tex_id);
+            let det_state = match detail {
+                None => String::new(),
+                Some(id) if texture_pngs.contains_key(&id) => format!(" det=0x{:08X}", id),
+                Some(id) => format!(" det=MISSING 0x{:08X}", id),
+            };
+            eprintln!(
+                "[moby-tex]   submesh[{:3}] b{}.m shader_idx={} (shader_tuid=0x{:016X}) verts={} alb={} nrm={} exp={}{}",
+                submesh_idx,
+                bangle_idx,
+                m.shader_index,
+                shader_tuid,
+                m.vertex_count,
+                alb_state,
+                nrm_state,
+                exp_state,
+                det_state,
+            );
+            submesh_idx += 1;
+        }
+    }
+    eprintln!(
+        "[moby-tex]   summary: ok_albedo={} missing_albedo={} no_albedo_in_shader={} (of {} submeshes)",
+        ok_albedo, missing_albedo, no_shader, total_submeshes,
+    );
 }
 
 fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, String> {
@@ -1845,8 +2076,131 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                 "[cache] -> V2 bulk_extract_pngs: needed={} textures",
                 needed_ids.len()
             );
-            let r = lunalib::bulk_extract_pngs(level_path, Some(&needed_ids), TEXTURE_MAX_DIM)
+            let mut r = lunalib::bulk_extract_pngs(level_path, Some(&needed_ids), TEXTURE_MAX_DIM)
                 .map_err(|e| e.to_string())?;
+
+            // Global-PSARC fallback. R2 (and presumably R3 / ACiT) store
+            // shared art (weapons, common characters, UI) in sibling
+            // `packed/game/global_*/built/tuids/<tuid>/{header,texel}.dat`
+            // folders, NOT in the level's own textures.dat / highmips.dat.
+            // Anything still missing after the in-level pass we re-try
+            // there. The global folders are optional — when the user only
+            // extracted the level PSARC (or the game ships everything per-
+            // level), `discover_and_index` returns an empty map and this
+            // block is a no-op with no log noise. Per-game/mod variability
+            // is expected; absent globals must not block the cache build.
+            let extracted_ids: HashSet<u32> = r.iter().map(|(id, _)| *id).collect();
+            let still_missing: Vec<u32> = needed_ids
+                .iter()
+                .copied()
+                .filter(|id| !extracted_ids.contains(id))
+                .collect();
+            if !still_missing.is_empty() {
+                let index = lunalib::texture_global::discover_and_index(level_path);
+                if !index.is_empty() {
+                    let mut recovered = 0usize;
+                    let mut attempted = 0usize;
+                    for id in &still_missing {
+                        let Some(entry) = index.get(id) else { continue };
+                        attempted += 1;
+                        match lunalib::texture_global::load_global_texture_png(
+                            &entry.folder,
+                            TEXTURE_MAX_DIM,
+                        ) {
+                            Ok(Some(png)) => {
+                                r.push((*id, png));
+                                recovered += 1;
+                            }
+                            Ok(None) => {
+                                eprintln!(
+                                    "[global-tex] tex 0x{:08X} at {} returned None — format unsupported or empty texel",
+                                    id,
+                                    entry.folder.display(),
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[global-tex] tex 0x{:08X} at {} decode failed: {}",
+                                    id,
+                                    entry.folder.display(),
+                                    e,
+                                );
+                            }
+                        }
+                    }
+                    eprintln!(
+                        "[global-tex] recovered {} / {} missing textures via global fallback ({} candidates in index, {} attempted)",
+                        recovered,
+                        still_missing.len(),
+                        index.len(),
+                        attempted,
+                    );
+                }
+            }
+
+            // Cross-level fallback. R2 shares art (lobby UI, coop/MP
+            // overlays, weapon variants) across level PSARCs, not the
+            // globals — so meshes in this level can reference IDs whose
+            // bytes only exist in another already-extracted level. Recompute
+            // still-missing AFTER the global pass and try each sibling
+            // level's textures.dat / highmips.dat as additional sources.
+            // Each sibling call is narrowed by the residual missing set so
+            // it only decodes what we actually need.
+            let after_global: HashSet<u32> = r.iter().map(|(id, _)| *id).collect();
+            let still_missing: Vec<u32> = needed_ids
+                .iter()
+                .copied()
+                .filter(|id| !after_global.contains(id))
+                .collect();
+            if !still_missing.is_empty() {
+                let siblings = lunalib::texture_global::find_sibling_extracted_levels(level_path);
+                if !siblings.is_empty() {
+                    let mut total_recovered = 0usize;
+                    let mut remaining: Vec<u32> = still_missing.clone();
+                    for sibling in &siblings {
+                        if remaining.is_empty() {
+                            break;
+                        }
+                        match lunalib::bulk_extract_pngs(
+                            sibling,
+                            Some(&remaining),
+                            TEXTURE_MAX_DIM,
+                        ) {
+                            Ok(recovered) => {
+                                let mut got: HashSet<u32> = HashSet::new();
+                                for (id, png) in recovered {
+                                    r.push((id, png));
+                                    got.insert(id);
+                                    total_recovered += 1;
+                                }
+                                if !got.is_empty() {
+                                    eprintln!(
+                                        "[cross-level-tex] recovered {} textures from {}",
+                                        got.len(),
+                                        sibling.display(),
+                                    );
+                                }
+                                remaining.retain(|id| !got.contains(id));
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[cross-level-tex] sibling {} failed: {}",
+                                    sibling.display(),
+                                    e,
+                                );
+                            }
+                        }
+                    }
+                    eprintln!(
+                        "[cross-level-tex] total recovered {} / {} via cross-level fallback ({} siblings tried, {} still unrecovered)",
+                        total_recovered,
+                        still_missing.len(),
+                        siblings.len(),
+                        remaining.len(),
+                    );
+                }
+            }
+
             eprintln!("[cache] V2 textures done — encoded={} PNGs", r.len());
             r
         }
@@ -1904,16 +2258,24 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
         },
     }};
 
-    // Write in 3 progress phases so the UI shows Materials → Normal maps →
-    // Textures. Each unique texture ID is written exactly once — IDs present
-    // in multiple roles land in the first phase they appear in.
+    // Write in 3 progress phases — emissions first, then normal maps, then
+    // albedos LAST. Albedos drive the visible look of every mesh, so loading
+    // them last means the viewport "completes" at the end of the run instead
+    // of starting full-color and then flickering as the duller channels
+    // (normal / emission) arrive. (The phase names "materials"/"normalmaps"/
+    // "textures" remain as-is — they're the typed union shared with the
+    // frontend; only the iteration order changes here.)
+    // Each unique texture ID is written exactly once — IDs present in multiple
+    // roles land in the first phase they appear in (so an emissive that's
+    // also someone's albedo will be written during the emissions phase, not
+    // duplicated in the albedos phase).
     let mut pngs_map: HashMap<u32, Vec<u8>> = pngs.into_iter().collect();
     let mut texture_pngs: HashMap<u32, Vec<u8>> = HashMap::with_capacity(pngs_map.len());
     let mut written: HashSet<u32> = HashSet::new();
     let phases: [(&'static str, &HashSet<u32>); 3] = [
-        ("materials", &needed_albedos),
-        ("normalmaps", &needed_normals),
         ("textures", &needed_emissives),
+        ("normalmaps", &needed_normals),
+        ("materials", &needed_albedos),
     ];
     for (phase_name, ids) in phases.iter() {
         let pending: Vec<u32> = ids
@@ -1979,6 +2341,13 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
             1.0 / 32768.0
         };
 
+        // Per-moby shader / texture diagnostic (self-gated on
+        // RECHIMERA_DEBUG_MOBY match — silent for unfiltered runs).
+        // Cross-references each submesh's shader_index against the encoded
+        // PNG set so MISSING textures show up alongside the submeshes that
+        // actually need them.
+        dump_moby_shader_textures(&asset, &shaders, &texture_pngs);
+
         let clips: Vec<DecodedClip> = if !asset.rfom_anim_offsets.is_empty() {
             match asset.skeleton.as_ref() {
                 Some(skel) => {
@@ -2030,7 +2399,20 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                 animsets_file.as_mut(),
             ) {
                 (Some(hash), Some(idx), Some(file)) => {
-                    decode_clips_for_moby(level_path, idx, file, hash, pos_scale, scale_scale)
+                    let sb = asset
+                        .skeleton
+                        .as_ref()
+                        .map(|s| s.bones.len() as u16)
+                        .unwrap_or(0);
+                    decode_clips_for_moby(
+                        level_path,
+                        idx,
+                        file,
+                        hash,
+                        pos_scale,
+                        scale_scale,
+                        sb,
+                    )
                 }
                 _ => Vec::new(),
             }
@@ -2585,8 +2967,20 @@ pub fn export_moby_glb_with_options(
             animset_index.as_ref(),
             animsets_file.as_mut(),
         ) {
-            clips
-                .extend(decode_clips_for_moby(level_path, idx, file, hash, pos_scale, scale_scale));
+            let sb = asset
+                .skeleton
+                .as_ref()
+                .map(|s| s.bones.len() as u16)
+                .unwrap_or(0);
+            clips.extend(decode_clips_for_moby(
+                level_path,
+                idx,
+                file,
+                hash,
+                pos_scale,
+                scale_scale,
+                sb,
+            ));
         }
 
         if !options.extra_clips.is_empty() && !matches!(layout, LevelLayout::V2) {
@@ -2624,8 +3018,20 @@ pub fn export_moby_glb_with_options(
                 } else {
                     1.0 / 32768.0
                 };
-                let extras =
-                    decode_clips_for_moby(level_path, idx, file, hash, pos_scale, scale_scale);
+                let sb = asset
+                    .skeleton
+                    .as_ref()
+                    .map(|s| s.bones.len() as u16)
+                    .unwrap_or(0);
+                let extras = decode_clips_for_moby(
+                    level_path,
+                    idx,
+                    file,
+                    hash,
+                    pos_scale,
+                    scale_scale,
+                    sb,
+                );
                 if pick.clip_indices.is_empty() {
                     clips.extend(extras);
                 } else {
@@ -3011,6 +3417,11 @@ fn try_load_skinned_moby_for_level(
         if let (Some(hash), Some(idx), Some(file)) =
             (asset.animset_hash, animset_index, animsets_file)
         {
+            let sb = asset
+                .skeleton
+                .as_ref()
+                .map(|s| s.bones.len() as u16)
+                .unwrap_or(0);
             clips.extend(decode_clips_for_moby(
                 level_path,
                 idx,
@@ -3018,6 +3429,7 @@ fn try_load_skinned_moby_for_level(
                 hash,
                 pos_scale,
                 scale_scale,
+                sb,
             ));
         }
     }
@@ -3694,9 +4106,21 @@ pub fn decode_animset_clip(
         .get(clip_index as usize)
         .copied()
         .ok_or_else(|| format!("clip index {clip_index} out of range ({} clips)", offsets.len()))?;
-    let header = read_animation_header_at(&mut ig, off).map_err(|e| format!("header: {e}"))?;
+    let mut header =
+        read_animation_header_at(&mut ig, off).map_err(|e| format!("header: {e}"))?;
+    // Mirror IT's additive numBones override (see decode_clips_for_moby for
+    // the long-form comment) — without this, V2 additive overlay clips
+    // (`mp_carbine_idle_p`, `mp_minigun_melee_a_p`, every weapon overlay)
+    // read their control blob at the wrong offsets and silently lose all
+    // their track data.
+    let skel_bone_count = skeleton.bones.len() as u16;
+    if header.is_additive() && skel_bone_count > 0 {
+        header.num_bones = skel_bone_count;
+    }
+    header.apply_frame_stride_padding();
     let ctrl =
         read_animation_control(&mut ig, &header).map_err(|e| format!("control: {e}"))?;
+
     let clip = decode_animation(&mut ig, &header, &ctrl, pos_scale, scale_scale)
         .map_err(|e| format!("decode: {e}"))?;
 

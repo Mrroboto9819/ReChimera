@@ -40,6 +40,7 @@ pub mod skeleton;
 pub mod sound;
 pub mod stream;
 pub mod texture;
+pub mod texture_global;
 pub mod texture_old;
 pub mod texture_rfom;
 pub mod tie;
@@ -111,9 +112,8 @@ pub use sound::{
 };
 pub use stream::{Endian, StreamHelper};
 pub use texture::{
-    bulk_extract_pngs, downsample_png_to, downsample_rgba, encode_png, read_textures,
-    read_textures_streaming,
-    read_textures_with_total, TexFormat, Texture,
+    bulk_extract_pngs, decode_image_file_to_png, downsample_png_to, downsample_rgba, encode_png,
+    read_textures, read_textures_streaming, read_textures_with_total, TexFormat, Texture,
 };
 pub use tie::{
     read_tie_assets, read_tie_assets_streaming, read_tie_assets_with_total, TieAsset, TieMeshGeom,

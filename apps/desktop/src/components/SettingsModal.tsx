@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import iconUrl from "../../icon.png?url";
 import { Modal } from "./Modal";
+import { Select } from "./Select";
 import { SUPPORTED_LANGUAGES, type Language } from "../i18n";
 import {
   APP_BRAND_NAME,
@@ -12,12 +13,18 @@ import {
 } from "../version";
 import {
   resetSettings,
+  setAppSkin,
   setAssetColor,
   setBrandColor,
   setLanguage,
   setTheme,
+  setUiSoundEnabled,
+  setUiSoundVolume,
   useAppDispatch,
   useAppSelector,
+  APP_SKINS,
+  getAppSkin,
+  type AppSkin,
   type AssetColors,
   type ThemeMode,
 } from "../store";
@@ -61,6 +68,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const theme = useAppSelector((s) => s.settings.theme);
+  const appSkin = useAppSelector((s) => s.settings.appSkin);
+  const allowedModes = getAppSkin(appSkin).allowedModes;
+  const uiSoundEnabled = useAppSelector((s) => s.settings.uiSoundEnabled);
+  const uiSoundVolume = useAppSelector((s) => s.settings.uiSoundVolume);
   const brandColor = useAppSelector((s) => s.settings.brandColor);
   const assetColors = useAppSelector((s) => s.settings.assetColors);
   const language = useAppSelector((s) => s.settings.language);
@@ -200,41 +211,107 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     {t("settings.languageHint")}
                   </div>
                 </div>
-                <select
-                  className="settings-language-select"
+                <Select
                   value={language}
-                  onChange={(e) =>
-                    dispatch(setLanguage(e.target.value as Language))
-                  }
-                >
-                  {SUPPORTED_LANGUAGES.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
+                  options={SUPPORTED_LANGUAGES.map((lang) => ({
+                    value: lang.code,
+                    label: lang.label,
+                  }))}
+                  onChange={(v) => dispatch(setLanguage(v as Language))}
+                  ariaLabel="Language"
+                />
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <div className="settings-row-label">Skin</div>
+                  <div className="settings-row-hint small dim">
+                    {getAppSkin(appSkin).description ?? "App-wide look. Extend via the APP_SKINS registry."}
+                  </div>
+                </div>
+                <Select
+                  value={appSkin}
+                  options={APP_SKINS.map((s) => ({
+                    value: s.id,
+                    label: s.label,
+                  }))}
+                  onChange={(v) => dispatch(setAppSkin(v as AppSkin))}
+                  ariaLabel="App skin"
+                />
               </div>
 
               <div className="settings-row">
                 <div className="settings-row-text">
                   <div className="settings-row-label">{t("settings.theme")}</div>
                   <div className="settings-row-hint small dim">
-                    {t("settings.themeHint")}
+                    {allowedModes.length < 2
+                      ? `The ${getAppSkin(appSkin).label} skin is ${allowedModes[0]}-only.`
+                      : t("settings.themeHint")}
                   </div>
                 </div>
                 <div className="settings-theme-toggle">
-                  {(["dark", "light"] as ThemeMode[]).map((tm) => (
-                    <button
-                      key={tm}
-                      className={`btn ${theme === tm ? "btn-primary" : ""}`}
-                      onClick={() => dispatch(setTheme(tm))}
-                    >
-                      {tm === "dark"
-                        ? t("settings.themeDark")
-                        : t("settings.themeLight")}
-                    </button>
-                  ))}
+                  {(["dark", "light"] as ThemeMode[]).map((tm) => {
+                    const disabled = !allowedModes.includes(tm);
+                    return (
+                      <button
+                        key={tm}
+                        className={`btn ${theme === tm ? "btn-primary" : ""}`}
+                        onClick={() => dispatch(setTheme(tm))}
+                        disabled={disabled}
+                        title={disabled ? "Not supported by current skin" : undefined}
+                      >
+                        {tm === "dark"
+                          ? t("settings.themeDark")
+                          : t("settings.themeLight")}
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <div className="settings-row-label">UI sound effects</div>
+                  <div className="settings-row-hint small dim">
+                    Plays per-skin sounds for clicks, confirms, and skin switches.
+                    Drop your own audio files into <code>public/ui-effects/&lt;skin&gt;/</code>.
+                  </div>
+                </div>
+                <div className="settings-theme-toggle">
+                  <button
+                    className={`btn ${uiSoundEnabled ? "btn-primary" : ""}`}
+                    onClick={() => dispatch(setUiSoundEnabled(true))}
+                  >
+                    On
+                  </button>
+                  <button
+                    className={`btn ${!uiSoundEnabled ? "btn-primary" : ""}`}
+                    onClick={() => dispatch(setUiSoundEnabled(false))}
+                  >
+                    Off
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <div className="settings-row-label">UI sound volume</div>
+                  <div className="settings-row-hint small dim">
+                    {Math.round(uiSoundVolume * 100)}%
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={uiSoundVolume}
+                  onChange={(e) =>
+                    dispatch(setUiSoundVolume(Number(e.target.value)))
+                  }
+                  disabled={!uiSoundEnabled}
+                  aria-label="UI sound volume"
+                />
               </div>
             </section>
           </>
@@ -250,12 +327,20 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     {t("settings.brandColor")}
                   </div>
                   <div className="settings-row-hint small dim">
-                    {t("settings.brandColorHint")}
+                    {getAppSkin(appSkin).primaryColor
+                      ? `The ${getAppSkin(appSkin).label} skin locks the brand color. Switch to Default to choose your own.`
+                      : t("settings.brandColorHint")}
                   </div>
                 </div>
                 <ColorField
-                  value={brandColor}
+                  value={getAppSkin(appSkin).primaryColor ?? brandColor}
                   onChange={(v) => dispatch(setBrandColor(v))}
+                  disabled={!!getAppSkin(appSkin).primaryColor}
+                  title={
+                    getAppSkin(appSkin).primaryColor
+                      ? `Locked by the ${getAppSkin(appSkin).label} skin`
+                      : undefined
+                  }
                 />
               </div>
             </section>
@@ -339,9 +424,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 interface ColorFieldProps {
   value: string;
   onChange: (next: string) => void;
+  disabled?: boolean;
+  title?: string;
 }
 
-function ColorField({ value, onChange }: ColorFieldProps) {
+function ColorField({ value, onChange, disabled, title }: ColorFieldProps) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const tryCommit = (v: string) => {
@@ -349,13 +436,14 @@ function ColorField({ value, onChange }: ColorFieldProps) {
     if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) onChange(trimmed);
   };
   return (
-    <div className="settings-color-field">
+    <div className="settings-color-field" title={title}>
       <input
         type="color"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="settings-color-swatch"
         aria-label="Pick color"
+        disabled={disabled}
       />
       <input
         type="text"
@@ -369,6 +457,7 @@ function ColorField({ value, onChange }: ColorFieldProps) {
         maxLength={7}
         className="settings-color-text mono"
         aria-label="Color hex"
+        disabled={disabled}
       />
     </div>
   );

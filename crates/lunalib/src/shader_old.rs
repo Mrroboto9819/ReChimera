@@ -67,6 +67,7 @@ pub fn read_shaders_old(level_folder: &Path) -> Result<HashMap<u64, ShaderInfo>>
                 albedo_tex_id: nonzero(albedo_offset),
                 normal_tex_id: nonzero(normal_offset),
                 expensive_tex_id: nonzero(expensive_offset),
+                detail_tex_id: None,
             },
         );
     }

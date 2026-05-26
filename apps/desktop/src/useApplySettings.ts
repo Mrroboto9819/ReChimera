@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import i18n from "./i18n";
-import { useAppSelector } from "./store";
+import { getAppSkin, useAppSelector } from "./store";
 
 
 
@@ -21,6 +21,7 @@ import { useAppSelector } from "./store";
 
 export function useApplySettings(): void {
   const theme = useAppSelector((s) => s.settings.theme);
+  const appSkin = useAppSelector((s) => s.settings.appSkin);
   const brand = useAppSelector((s) => s.settings.brandColor);
   const colors = useAppSelector((s) => s.settings.assetColors);
   const language = useAppSelector((s) => s.settings.language);
@@ -32,6 +33,10 @@ export function useApplySettings(): void {
   }, [theme]);
 
   useEffect(() => {
+    document.documentElement.setAttribute("data-app-skin", appSkin);
+  }, [appSkin]);
+
+  useEffect(() => {
     if (i18n.language !== language) {
       void i18n.changeLanguage(language);
     }
@@ -40,12 +45,14 @@ export function useApplySettings(): void {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--brand-color", brand);
-    root.style.setProperty("--accent-blue", brand);
-    if (/^#[0-9a-fA-F]{6}$/.test(brand)) {
-      root.style.setProperty("--tint-blue", `${brand}26`);
+    const skinPrimary = getAppSkin(appSkin).primaryColor;
+    const effective = skinPrimary ?? brand;
+    root.style.setProperty("--brand-color", effective);
+    root.style.setProperty("--accent-blue", effective);
+    if (/^#[0-9a-fA-F]{6}$/.test(effective)) {
+      root.style.setProperty("--tint-blue", `${effective}26`);
     }
-  }, [brand]);
+  }, [brand, appSkin]);
 
   useEffect(() => {
     const root = document.documentElement;

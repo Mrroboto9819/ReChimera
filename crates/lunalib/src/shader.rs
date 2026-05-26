@@ -19,6 +19,15 @@ pub struct ShaderInfo {
     pub albedo_tex_id: Option<u32>,
     pub normal_tex_id: Option<u32>,
     pub expensive_tex_id: Option<u32>,
+    // Why: R2 (V2) shaders use IT's `MaterialResourceNameLookup`
+    // (shader.hpp:213, V1 layout) — 4 hashes at base+0x10..0x20 then 4
+    // `mapLookupPaths` u32 pointers at base+0x20..0x30. Slot order is
+    // diffuse / normal / specular / detail per V1_5's `Material`
+    // (shader.hpp:184). Detail map is sometimes the only populated slot
+    // on shaders whose other 3 are zero. Slots past offset 0x20 are
+    // path-string pointers, NOT texture hashes — empirically they read
+    // as tiny values (0x190-0x2B0) and binding them would mis-render.
+    pub detail_tex_id: Option<u32>,
 }
 
 
@@ -65,6 +74,7 @@ fn parse_shader<R: Read + Seek>(ig: &mut IgFile<R>, tuid: u64) -> Result<ShaderI
             albedo_tex_id: None,
             normal_tex_id: None,
             expensive_tex_id: None,
+            detail_tex_id: None,
         });
     };
 
@@ -74,6 +84,14 @@ fn parse_shader<R: Read + Seek>(ig: &mut IgFile<R>, tuid: u64) -> Result<ShaderI
     let albedo = ig.stream.read_u32()?;
     let normal = ig.stream.read_u32()?;
     let expensive = ig.stream.read_u32()?;
+    let detail = ig.stream.read_u32().unwrap_or(0);
+
+    if std::env::var("RECHIMERA_LOG_SHADER_SLOTS").is_ok() && detail != 0 {
+        eprintln!(
+            "[shader-slots] tuid=0x{:016X} a=0x{:08X} n=0x{:08X} s=0x{:08X} d=0x{:08X}",
+            tuid, albedo, normal, expensive, detail
+        );
+    }
 
     if std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -116,5 +134,6 @@ fn parse_shader<R: Read + Seek>(ig: &mut IgFile<R>, tuid: u64) -> Result<ShaderI
         albedo_tex_id: (albedo != 0).then_some(albedo),
         normal_tex_id: (normal != 0).then_some(normal),
         expensive_tex_id: (expensive != 0).then_some(expensive),
+        detail_tex_id: (detail != 0).then_some(detail),
     })
 }

@@ -17,6 +17,12 @@ export const VIEW_META: Record<ViewId, ViewMeta> = {
     i18nKey: "views.viewport",
     singleton: true,
   },
+  assetWorkbench: {
+    id: "assetWorkbench",
+    label: "Asset",
+    i18nKey: "views.assetWorkbench",
+    singleton: true,
+  },
 };
 
 export const ALL_VIEW_IDS: ViewId[] = [
@@ -24,4 +30,5 @@ export const ALL_VIEW_IDS: ViewId[] = [
   "inspector",
   "console",
   "viewport",
+  "assetWorkbench",
 ];
