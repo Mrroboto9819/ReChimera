@@ -278,40 +278,6 @@ export function CacheLibraryModal({
   const [soundCategory, setSoundCategory] = useState<SoundCategory | "all">(
     "all",
   );
-  const [bulkSoundZipBusy, setBulkSoundZipBusy] = useState(false);
-  const [bulkSoundZipStatus, setBulkSoundZipStatus] = useState<string | null>(null);
-
-  const handleBulkSoundZip = useCallback(async () => {
-    if (!folder || bulkSoundZipBusy) return;
-    setBulkSoundZipStatus(null);
-    const lastSeg = folder
-      .replace(/[\\/]+$/, "")
-      .split(/[\\/]/)
-      .pop() || "sounds";
-    const suggested = `${lastSeg}-sounds.zip`;
-    let outPath: string | null = null;
-    try {
-      const picked = await saveDialog({
-        defaultPath: suggested,
-        filters: [{ name: "Zip archive", extensions: ["zip"] }],
-        title: "Save all level sounds as ZIP",
-      });
-      if (typeof picked === "string") outPath = picked;
-    } catch (e) {
-      setBulkSoundZipStatus(`Picker failed: ${e}`);
-      return;
-    }
-    if (!outPath) return;
-    setBulkSoundZipBusy(true);
-    try {
-      const count = await bulkExtractSoundsZip(folder, outPath);
-      setBulkSoundZipStatus(`Wrote ${count} WAVs → ${outPath}`);
-    } catch (e) {
-      setBulkSoundZipStatus(`Failed: ${e}`);
-    } finally {
-      setBulkSoundZipBusy(false);
-    }
-  }, [folder, bulkSoundZipBusy]);
 
   const soundRows = useMemo(() => {
     if (filter !== "sound") return [];
@@ -1367,54 +1333,39 @@ export function CacheLibraryModal({
             <span className="dim small">{totalShown}</span>
           </div>
           {filter === "sound" && (
-            <div className="cache-library-sound-toolbar">
-              <div
-                className="cache-library-subtabs"
-                role="tablist"
-                aria-label="Sound category"
-              >
-                {(
-                  [
-                    ["all", "All"],
-                    ["sfx", "SFX"],
-                    ["dialog", "Dialog"],
-                    ["music", "Music"],
-                  ] as const
-                ).map(([key, label]) => {
-                  const count = soundCategoryCounts[key];
-                  const isActive = soundCategory === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      role="tab"
-                      aria-selected={isActive}
-                      className={`cache-library-subtab${
-                        isActive ? " active" : ""
-                      }`}
-                      onClick={() => setSoundCategory(key)}
-                    >
-                      {label}
-                      <span className="cache-library-subtab-count dim small">
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <Button
-                onClick={handleBulkSoundZip}
-                disabled={!folder || bulkSoundZipBusy}
-                title="Decode every sound bank + stream and pack the WAVs into a single .zip"
-              >
-                <Download size={14} />
-                {bulkSoundZipBusy ? "Packing…" : "Download all as ZIP"}
-              </Button>
-            </div>
-          )}
-          {filter === "sound" && bulkSoundZipStatus && (
-            <div className="small dim" style={{ padding: "4px 12px" }}>
-              {bulkSoundZipStatus}
+            <div
+              className="cache-library-subtabs"
+              role="tablist"
+              aria-label="Sound category"
+            >
+              {(
+                [
+                  ["all", "All"],
+                  ["sfx", "SFX"],
+                  ["dialog", "Dialog"],
+                  ["music", "Music"],
+                ] as const
+              ).map(([key, label]) => {
+                const count = soundCategoryCounts[key];
+                const isActive = soundCategory === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className={`cache-library-subtab${
+                      isActive ? " active" : ""
+                    }`}
+                    onClick={() => setSoundCategory(key)}
+                  >
+                    {label}
+                    <span className="cache-library-subtab-count dim small">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
           {manifestError && (

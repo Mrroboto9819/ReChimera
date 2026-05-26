@@ -7183,13 +7183,13 @@ textarea {
 .r2-hud-preview-art .fallback-image {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .r2-hud-preview-art .fallback-image > img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .r2-hud-preview-art-letter {

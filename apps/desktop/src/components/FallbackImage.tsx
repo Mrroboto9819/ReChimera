@@ -99,11 +99,8 @@ export function levelThumbCandidatesFromPath(folderPath: string, gameId: string)
 
 /** Franchise-wide placeholder image — used when the per-level PNG
  *  doesn't exist. Resistance games (r1/r2/r3) share `r_notset.webp`;
- *  R&C games (anything with `rc_` prefix) share `r&c_notset.jpeg`. */
+ *  R&C games (anything with `rc_` prefix) share `rc_notset.jpeg`. */
 export function franchisePlaceholder(gameId: string): string {
-  if (gameId.startsWith("rc_")) {
-    // `&` in URL paths is technically legal but ambiguous; encode it.
-    return `/${encodeURIComponent("r&c_notset.jpeg")}`;
-  }
+  if (gameId.startsWith("rc_")) return "/rc_notset.jpeg";
   return "/r_notset.webp";
 }

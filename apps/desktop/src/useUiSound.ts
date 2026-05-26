@@ -10,7 +10,8 @@ export type UiSoundEvent =
   | "back"
   | "confirm"
   | "error"
-  | "skin-switch";
+  | "skin-switch"
+  | "modal-open";
 
 const EXTS = ["wav", "ogg", "mp3"] as const;
 

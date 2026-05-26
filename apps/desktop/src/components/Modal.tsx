@@ -8,6 +8,7 @@ import {
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { useAppSelector, getAppSkin } from "../store";
+import { useUiSound } from "../useUiSound";
 
 interface ModalProps {
   
@@ -76,12 +77,20 @@ export function Modal({
   const isHud = modalClass === "modal-dialog--hud";
   const backdropRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const play = useUiSound();
+  const prevOpenRef = useRef(open);
   
   
   const tlRef = useRef<gsap.core.Timeline | null>(null);
 
   
   
+  useEffect(() => {
+    if (prevOpenRef.current === open) return;
+    prevOpenRef.current = open;
+    play(open ? "modal-open" : "back");
+  }, [open, play]);
+
   useLayoutEffect(() => {
     const backdrop = backdropRef.current;
     const dialog = dialogRef.current;
@@ -197,6 +206,7 @@ export function Modal({
                 className="modal-close"
                 onClick={() => onClose?.()}
                 aria-label="Close"
+                data-no-sound
               >
                 ×
               </button>
