@@ -43,7 +43,13 @@ base64 = "0.22"
 # a file instead of needing per-invocation `set`/`$env:` shell incantations.
 # Production builds harmlessly skip the lookup if no `.env` exists.
 dotenvy = "0.15"
+# Used by r2_read_scaleform_image_crop to slice atlas images into virtual
+# thumbnails. Same feature set as lunalib so cargo unifies the resolved
+# version — no duplicate compile.
+image = { version = "0.25", default-features = false, features = ["png", "tga", "jpeg", "dds"] }
+# Bulk sound export packs many WAVs into a single .zip download.
+# Default-features=false drops bzip2/deflate libs we don't need —
+# WAV (PCM) doesn't compress well anyway, so we write store-mode only.
+zip = { version = "0.6", default-features = false }
 lunalib = { path = "../../../crates/lunalib" }
 psarc = { path = "../../../crates/psarc" }
-image = { version = "0.25", default-features = false, features = ["png", "tga", "jpeg", "dds"] }
-zip = { version = "0.6", default-features = false }

@@ -197,6 +197,25 @@ export function Hierarchy({
   const [assetLibCollapsed, setAssetLibCollapsed] = useState<
     Record<string, boolean>
   >({});
+  // Per-asset toggle for the inline submesh + texture list under each
+  // moby/tie leaf. Defaults to collapsed (44-submesh mobys would drown
+  // the panel otherwise — opt-in per asset).
+  const [expandedAssets, setExpandedAssets] = useState<Set<string>>(new Set());
+
+  // Derive the set of texture IDs actually extracted to disk so we can
+  // mark submesh texture refs that point at nothing with the same
+  // purple marker the AssetWorkbench uses for missing-data tints.
+  const cacheTextureIds = useMemo(() => {
+    const out = new Set<number>();
+    if (!cacheManifest) return out;
+    for (const e of cacheManifest.entries) {
+      if (e.kind !== "texture") continue;
+      const stem = e.name?.replace(/\.png$/i, "") ?? "";
+      const n = Number(stem);
+      if (Number.isFinite(n)) out.add(n);
+    }
+    return out;
+  }, [cacheManifest]);
   const [filter, setFilter] = useState("");
   const [section, setSection] = useState<"map" | "cache">(() => {
     try {
@@ -538,6 +557,9 @@ export function Hierarchy({
                     instances={instances}
                     selection={selection}
                     onPreviewRawAsset={onPreviewRawAsset}
+                    expandedAssets={expandedAssets}
+                    setExpandedAssets={setExpandedAssets}
+                    cacheTextureIds={cacheTextureIds}
                   />
                 ))}
               </div>
@@ -708,6 +730,9 @@ function AssetLibraryTree({
   instances,
   selection,
   onPreviewRawAsset,
+  expandedAssets,
+  setExpandedAssets,
+  cacheTextureIds,
 }: {
   node: AssetTreeNode;
   depth: number;
@@ -717,6 +742,9 @@ function AssetLibraryTree({
   instances: Instance[];
   selection: Selection;
   onPreviewRawAsset?: (assetTuid: string) => void;
+  expandedAssets: Set<string>;
+  setExpandedAssets: React.Dispatch<React.SetStateAction<Set<string>>>;
+  cacheTextureIds: Set<number>;
 }) {
   // Every folder defaults to collapsed at every depth — opening a
   // parent does NOT auto-expand its children. The user explicitly
@@ -758,47 +786,75 @@ function AssetLibraryTree({
   const renderChildrenExpanded = filter ? true : !isCollapsed;
 
   if (node.asset) {
-    
-    
-    
-    
-    
-    
+    const asset = node.asset;
     const isSelected = firstPlaced && selection.isSelected(firstPlaced.tuid);
     const isPrimary =
       firstPlaced && selection.primary === firstPlaced.tuid;
+    const hasSubmeshes =
+      (node.kind === "moby" || node.kind === "tie") &&
+      Array.isArray(asset.submeshes) &&
+      asset.submeshes.length > 0;
+    const isAssetExpanded = expandedAssets.has(asset.asset_tuid);
+    const toggleAsset = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setExpandedAssets((prev) => {
+        const next = new Set(prev);
+        if (next.has(asset.asset_tuid)) next.delete(asset.asset_tuid);
+        else next.add(asset.asset_tuid);
+        return next;
+      });
+    };
     return (
-      <div
-        className={`tree-node ${isSelected ? "selected" : ""} ${isPrimary ? "primary" : ""}`}
-        style={{ paddingLeft: `${depth * 12}px` }}
-        onClick={(e) => {
-          e.stopPropagation();
-          const mods = clickMods(e);
-          if (mods.ctrl && firstPlaced) {
-            selection.select(firstPlaced, mods);
-          } else if (node.asset && onPreviewRawAsset) {
-            onPreviewRawAsset(node.asset.asset_tuid);
-          } else if (firstPlaced) {
-            selection.select(firstPlaced, mods);
+      <>
+        <div
+          className={`tree-node ${isSelected ? "selected" : ""} ${isPrimary ? "primary" : ""}`}
+          style={{ paddingLeft: `${depth * 12}px` }}
+          onClick={(e) => {
+            e.stopPropagation();
+            const mods = clickMods(e);
+            if (mods.ctrl && firstPlaced) {
+              selection.select(firstPlaced, mods);
+            } else if (onPreviewRawAsset) {
+              onPreviewRawAsset(asset.asset_tuid);
+            } else if (firstPlaced) {
+              selection.select(firstPlaced, mods);
+            }
+          }}
+          title={
+            firstPlaced
+              ? `${asset.asset_tuid}\nClick: open preview · Ctrl-click: select world placement`
+              : `${asset.asset_tuid}\nClick: open preview (asset is not placed in this level)`
           }
-        }}
-        title={
-          firstPlaced
-            ? `${node.asset.asset_tuid}\nClick: open preview · Ctrl-click: select world placement`
-            : `${node.asset.asset_tuid}\nClick: open preview (asset is not placed in this level)`
-        }
-      >
-        <span className="tree-toggle" />
-        <span className={`tree-icon kind-${node.kind}`}>
-          {KIND_GLYPHS[node.kind] ?? "?"}
-        </span>
-        <span className="tree-label small">{node.label}</span>
-        {!firstPlaced && (
-          <span className="tree-count mono small dim" title="Asset is in lookup but not placed in the world">
-            ∅
+        >
+          {hasSubmeshes ? (
+            <span
+              className="tree-toggle clickable"
+              onClick={toggleAsset}
+              title={isAssetExpanded ? "Hide submeshes" : "Show submeshes"}
+            >
+              {isAssetExpanded ? "▾" : "▸"}
+            </span>
+          ) : (
+            <span className="tree-toggle" />
+          )}
+          <span className={`tree-icon kind-${node.kind}`}>
+            {KIND_GLYPHS[node.kind] ?? "?"}
           </span>
+          <span className="tree-label small">{node.label}</span>
+          {!firstPlaced && (
+            <span className="tree-count mono small dim" title="Asset is in lookup but not placed in the world">
+              ∅
+            </span>
+          )}
+        </div>
+        {hasSubmeshes && isAssetExpanded && (
+          <SubmeshList
+            submeshes={asset.submeshes}
+            cacheTextureIds={cacheTextureIds}
+            depth={depth}
+          />
         )}
-      </div>
+      </>
     );
   }
 
@@ -837,10 +893,87 @@ function AssetLibraryTree({
               instances={instances}
               selection={selection}
               onPreviewRawAsset={onPreviewRawAsset}
+              expandedAssets={expandedAssets}
+              setExpandedAssets={setExpandedAssets}
+              cacheTextureIds={cacheTextureIds}
             />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Inline submesh + texture list shown under each expanded asset leaf.
+ * One row per submesh (indented), with three texture-id chips
+ * (a/n/e). Each chip is rendered with a small color square — green if
+ * the texture is present in the cache, purple (#bb55ff, same as
+ * AssetWorkbench's missing-data tint) if the ID doesn't resolve.
+ */
+function SubmeshList({
+  submeshes,
+  cacheTextureIds,
+  depth,
+}: {
+  submeshes: AssetMeshes["submeshes"];
+  cacheTextureIds: Set<number>;
+  depth: number;
+}) {
+  return (
+    <div className="hierarchy-submesh-list">
+      {submeshes.map((s, i) => (
+        <div
+          key={i}
+          className="hierarchy-submesh-row"
+          style={{ paddingLeft: `${(depth + 1) * 12 + 14}px` }}
+          title={`Submesh ${i}`}
+        >
+          <span className="hierarchy-submesh-idx mono small dim">
+            [{i}]
+          </span>
+          <span className="hierarchy-submesh-chips">
+            <TextureChip slot="a" id={s.albedo_id} present={cacheTextureIds} />
+            <TextureChip slot="n" id={s.normal_id} present={cacheTextureIds} />
+            <TextureChip slot="e" id={s.emissive_id} present={cacheTextureIds} />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TextureChip({
+  slot,
+  id,
+  present,
+}: {
+  slot: "a" | "n" | "e";
+  id: number | null;
+  present: Set<number>;
+}) {
+  if (id == null) {
+    return (
+      <span
+        className="hierarchy-tex-chip empty"
+        title={`No ${slot === "a" ? "albedo" : slot === "n" ? "normal" : "emissive"} bound`}
+      >
+        <span className="hierarchy-tex-chip-slot">{slot}</span>
+        <span className="dim">—</span>
+      </span>
+    );
+  }
+  const isMissing = !present.has(id);
+  return (
+    <span
+      className={`hierarchy-tex-chip ${isMissing ? "missing" : "ok"}`}
+      title={`${slot === "a" ? "Albedo" : slot === "n" ? "Normal" : "Emissive"}: 0x${id.toString(16).toUpperCase().padStart(8, "0")}${
+        isMissing ? " (not in cache — engine fallback)" : ""
+      }`}
+    >
+      <span className="hierarchy-tex-chip-marker" />
+      <span className="hierarchy-tex-chip-slot">{slot}</span>
+      <span className="mono small">{id.toString(16).slice(-4)}</span>
+    </span>
   );
 }

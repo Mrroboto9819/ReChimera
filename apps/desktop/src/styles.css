@@ -909,6 +909,11 @@ textarea {
   cursor: pointer;
   box-shadow: var(--shadow-button);
   transition: opacity 0.1s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1.2;
 }
 
 .btn:hover:not(:disabled) {
@@ -1629,13 +1634,19 @@ textarea {
 
 .inspector-actions {
   padding: 0 16px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
 }
-
 .inspector-actions .btn {
   width: 100%;
+  min-width: 0;
+}
+/* Why: the primary export action is the destination of the panel — give
+   it the full row so it reads as the main CTA while the secondary
+   actions (Go to / View model) sit side-by-side above it. */
+.inspector-actions .btn-primary {
+  grid-column: 1 / -1;
 }
 
 
@@ -3999,6 +4010,77 @@ textarea {
   font-size: 9px;
   flex-shrink: 0;
 }
+.tree-toggle.clickable {
+  cursor: pointer;
+}
+.tree-toggle.clickable:hover {
+  color: var(--text-1);
+}
+
+/* ===== Hierarchy: inline submesh + texture list ===== */
+.hierarchy-submesh-list {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.015);
+  border-left: 1px solid color-mix(in srgb, var(--brand-color, #ff6363) 25%, transparent);
+  margin-left: 6px;
+}
+.hierarchy-submesh-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 0;
+  min-height: 18px;
+  font-size: 10px;
+}
+.hierarchy-submesh-row:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+.hierarchy-submesh-idx {
+  min-width: 28px;
+  font-size: 10px;
+}
+.hierarchy-submesh-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.hierarchy-tex-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 9px;
+  background: rgba(0, 0, 0, 0.2);
+}
+.hierarchy-tex-chip.empty {
+  opacity: 0.45;
+}
+.hierarchy-tex-chip-slot {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+.hierarchy-tex-chip-marker {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.hierarchy-tex-chip.ok .hierarchy-tex-chip-marker {
+  background: #4ade80;
+}
+.hierarchy-tex-chip.missing .hierarchy-tex-chip-marker {
+  background: #bb55ff;
+  box-shadow: 0 0 4px rgba(187, 85, 255, 0.55);
+}
+.hierarchy-tex-chip.missing {
+  border-color: color-mix(in srgb, #bb55ff 40%, var(--border));
+}
 
 .tree-icon {
   width: 14px;
@@ -5312,6 +5394,19 @@ textarea {
   font-size: 10px;
   flex: 0 0 auto;
 }
+/* Wrapper that owns the search input + scrollable option list when the
+   Select is in `searchable` mode. The wrapper is fixed-positioned by the
+   component; the inner list keeps the scrolling. */
+.select-popover-wrap {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  z-index: 1000;
+}
 .select-popover {
   list-style: none;
   margin: 0;
@@ -5324,6 +5419,54 @@ textarea {
   z-index: 1000;
   font-family: var(--font-mono);
   font-size: 12px;
+}
+/* When wrapped (searchable mode), let the list participate in the
+   wrapper's flex column and lose its own border/shadow so the search
+   input + list read as a single surface. */
+.select-popover-wrap .select-popover {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.select-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  flex: 0 0 auto;
+}
+.select-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.select-search-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  background: rgba(255, 255, 255, 0.06);
+}
+.select-search-clear {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+.select-search-clear:hover {
+  color: var(--text-1);
 }
 .select-option {
   display: flex;
@@ -6291,7 +6434,8 @@ textarea {
 }
 .game-franchise-tab.active {
   color: var(--text-1);
-  background: hsla(202, 100%, 67%, 0.18);
+  background: color-mix(in srgb, var(--brand-color) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-color) 35%, transparent);
 }
 .game-franchise-tab-count {
   font-variant-numeric: tabular-nums;
@@ -6300,9 +6444,10 @@ textarea {
   background: rgba(255, 255, 255, 0.06);
 }
 .game-franchise-tab.active .game-franchise-tab-count {
-  background: hsla(202, 100%, 67%, 0.22);
+  background: color-mix(in srgb, var(--brand-color) 30%, transparent);
   color: var(--text-1);
 }
+
 
 /* ───────────────────────────────────────────────────────────────────
    HUD theme — Resistance-style pause-menu modal skin
@@ -6555,6 +6700,7 @@ textarea {
   background: rgba(212, 184, 96, 0.08);
   border-color: var(--hud-amber-dim);
 }
+
 .r2-step {
   display: flex;
   flex-direction: column;
@@ -8691,4 +8837,284 @@ textarea {
   font-size: 8px;
   letter-spacing: 1px;
   padding: 2px 4px;
+}
+
+.aw-root {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-1);
+  color: var(--text);
+  overflow: hidden;
+}
+.aw-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.aw-drawer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg-0);
+  transition: width 120ms ease;
+  z-index: 2;
+  flex-shrink: 0;
+}
+.aw-drawer.open {
+  width: 240px;
+}
+.aw-drawer.closed {
+  width: 26px;
+}
+.aw-burger {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.aw-burger:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.aw-drawer-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+}
+.aw-drawer-tab {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  padding: 5px 4px 4px;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.15;
+  border-bottom: 2px solid transparent;
+}
+.aw-drawer-tab > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.aw-drawer-tab:hover {
+  color: var(--text);
+}
+.aw-drawer-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--brand-color, #ff6363);
+}
+.aw-drawer-tab-count {
+  font-size: 9px;
+  opacity: 0.6;
+  line-height: 1;
+}
+.aw-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.aw-status {
+  padding: 8px 10px;
+}
+.aw-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.aw-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.aw-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.aw-row.hidden .aw-row-label,
+.aw-row.hidden .aw-row-meta {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+.aw-eye,
+.aw-anim-pick {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.aw-eye:hover,
+.aw-anim-pick:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.aw-row-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.aw-row-meta {
+  flex-shrink: 0;
+}
+.aw-tex-list .aw-tex-row {
+  align-items: flex-start;
+  padding: 6px 8px;
+}
+.aw-tex-thumb {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.aw-tex-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+.aw-tex-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  flex: 1;
+}
+.aw-anim-row.active {
+  background: color-mix(in srgb, var(--brand-color, #ff6363) 12%, transparent);
+}
+.aw-viewport {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.aw-viewport > canvas {
+  display: block;
+}
+.aw-playback {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  backdrop-filter: blur(6px);
+}
+.aw-pb-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.aw-pb-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+.aw-pb-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.aw-pb-meta {
+  white-space: nowrap;
+}
+.aw-pb-clip {
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.aw-pb-timeline {
+  position: relative;
+  flex: 1;
+  min-width: 80px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+}
+.aw-pb-timeline.disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.aw-pb-timeline-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--brand-color, #ff6363) 35%, transparent);
+  pointer-events: none;
+}
+.aw-pb-timeline-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+.aw-pb-timeline-cursor {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--brand-color, #ff6363);
+  box-shadow: 0 0 4px var(--brand-color, #ff6363);
+  pointer-events: none;
+  transform: translateX(-1px);
+}
+.aw-export-wrap {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+}
+.aw-export-wrap .btn {
+  backdrop-filter: blur(6px);
 }

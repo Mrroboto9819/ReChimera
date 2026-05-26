@@ -2541,6 +2541,147 @@ fn extract_one_sound(
 }
 
 
+/// Bulk-extract every bank sound + every stream sound the level has,
+/// write each WAV into a single .zip at `zip_out_path`, return the
+/// count written. Skips already-extracted sounds in the level cache
+/// only when reading is fast enough — usually a full bank pass is
+/// cheaper than checking each cache file individually, so we just
+/// re-extract.
+///
+/// The zip uses Store mode (no compression) since PCM WAV data
+/// compresses poorly and the encode overhead would dominate. Filename
+/// inside the zip is `<safe_sound_name>.wav`; collisions across banks
+/// resolve by appending a `__<bankstem>` suffix to keep both files.
+#[tauri::command]
+fn bulk_extract_sounds_zip(
+    level_folder: String,
+    zip_out_path: String,
+) -> Result<usize, String> {
+    use std::io::Write;
+    let folder = Path::new(&level_folder);
+    let banks = list_sound_banks_in(folder)
+        .map_err(|e| format!("read_dir {}: {e}", folder.display()))?;
+    if banks.is_empty() {
+        return Err(format!("no sound banks found in {}", folder.display()));
+    }
+
+    let zip_file = File::create(&zip_out_path)
+        .map_err(|e| format!("create zip {zip_out_path}: {e}"))?;
+    let mut zip = zip::ZipWriter::new(zip_file);
+    let opts: zip::write::FileOptions =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut written = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+
+    let safe = |s: &str| -> String {
+        s.chars()
+            .map(|c| match c {
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+                _ => c,
+            })
+            .collect::<String>()
+    };
+
+    for bank in &banks {
+        let path = folder.join(bank);
+        let file = match File::open(&path) {
+            Ok(f) => f,
+            Err(e) => {
+                errors.push(format!("open {bank}: {e}"));
+                continue;
+            }
+        };
+        let mut ig = match IgFile::open(BufReader::new(file)) {
+            Ok(ig) => ig,
+            Err(e) => {
+                errors.push(format!("igfile {bank}: {e}"));
+                continue;
+            }
+        };
+
+        // Banks: parse once, write every contained sound to zip.
+        match extract_bank_sounds_for_file(&mut ig, bank) {
+            Ok(sounds) => {
+                for s in sounds {
+                    let mut name = format!("{}.wav", safe(&s.name));
+                    if !seen.insert(name.clone()) {
+                        let stem = bank.rsplit('.').nth(1).unwrap_or(bank);
+                        name = format!("{}__{}.wav", safe(&s.name), safe(stem));
+                        if !seen.insert(name.clone()) {
+                            continue;
+                        }
+                    }
+                    if let Err(e) = zip.start_file(&name, opts) {
+                        errors.push(format!("zip entry {name}: {e}"));
+                        continue;
+                    }
+                    if let Err(e) = zip.write_all(&s.wav) {
+                        errors.push(format!("zip write {name}: {e}"));
+                        continue;
+                    }
+                    written += 1;
+                }
+            }
+            Err(e) => errors.push(format!("bank {bank}: {e}")),
+        }
+
+        // Streams: each bank has its own stream file (resolved inside
+        // extract_stream_sounds via filename convention). Best-effort —
+        // banks without a stream sidecar just no-op.
+        let stream_filename = bank
+            .strip_suffix(".dat")
+            .map(|stem| format!("{stem}stream.dat"))
+            .unwrap_or_else(|| format!("{bank}.stream"));
+        let stream_path = folder.join(&stream_filename);
+        if !stream_path.is_file() {
+            continue;
+        }
+        let stream_file = match File::open(&stream_path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let mut sig = match IgFile::open(BufReader::new(stream_file)) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let mut stream_errors: Vec<String> = Vec::new();
+        if let Ok(streams) =
+            extract_stream_sounds(&mut sig, &stream_path, &mut stream_errors)
+        {
+            for s in streams {
+                let mut name = format!("{}.wav", safe(&s.name));
+                if !seen.insert(name.clone()) {
+                    name = format!("{}__stream.wav", safe(&s.name));
+                    if !seen.insert(name.clone()) {
+                        continue;
+                    }
+                }
+                if let Err(e) = zip.start_file(&name, opts) {
+                    errors.push(format!("zip entry {name}: {e}"));
+                    continue;
+                }
+                if let Err(e) = zip.write_all(&s.wav) {
+                    errors.push(format!("zip write {name}: {e}"));
+                    continue;
+                }
+                written += 1;
+            }
+        }
+    }
+
+    zip.finish()
+        .map_err(|e| format!("zip finish: {e}"))?;
+    eprintln!(
+        "[bulk-sound-zip] wrote {} sounds to {} (errors={})",
+        written,
+        zip_out_path,
+        errors.len()
+    );
+    Ok(written)
+}
+
 #[tauri::command]
 fn extract_level_sounds(level_folder: String) -> Result<Vec<ExtractedSoundDto>, String> {
     let folder = Path::new(&level_folder);
@@ -2710,135 +2851,6 @@ fn extract_raw_streaming_sounds(
         .collect())
 }
 
-/// Walk every sound bank + matching stream sidecar in a level folder
-/// and pack every decoded WAV into a single zip. Returns the total
-/// count written. Zip uses Store mode (no compression) — PCM WAV data
-/// doesn't compress well and the encode overhead would dominate.
-/// Filenames inside the zip are `<safe_sound_name>.wav`; collisions
-/// across banks/streams resolve by appending a `__<bankstem>` or
-/// `__stream` suffix.
-#[tauri::command]
-fn bulk_extract_sounds_zip(
-    level_folder: String,
-    zip_out_path: String,
-) -> Result<usize, String> {
-    use std::io::Write;
-    let folder = Path::new(&level_folder);
-    let banks = list_sound_banks_in(folder)
-        .map_err(|e| format!("read_dir {}: {e}", folder.display()))?;
-    if banks.is_empty() {
-        return Err(format!("no sound banks found in {}", folder.display()));
-    }
-
-    let zip_file = File::create(&zip_out_path)
-        .map_err(|e| format!("create zip {zip_out_path}: {e}"))?;
-    let mut zip = zip::ZipWriter::new(zip_file);
-    let opts: zip::write::FileOptions =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut written = 0usize;
-    let mut errors: Vec<String> = Vec::new();
-
-    let safe = |s: &str| -> String {
-        s.chars()
-            .map(|c| match c {
-                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-                _ => c,
-            })
-            .collect::<String>()
-    };
-
-    for bank in &banks {
-        let path = folder.join(bank);
-        let file = match File::open(&path) {
-            Ok(f) => f,
-            Err(e) => {
-                errors.push(format!("open {bank}: {e}"));
-                continue;
-            }
-        };
-        let mut ig = match IgFile::open(BufReader::new(file)) {
-            Ok(ig) => ig,
-            Err(e) => {
-                errors.push(format!("igfile {bank}: {e}"));
-                continue;
-            }
-        };
-
-        match extract_bank_sounds_for_file(&mut ig, bank) {
-            Ok(sounds) => {
-                for s in sounds {
-                    let mut name = format!("{}.wav", safe(&s.name));
-                    if !seen.insert(name.clone()) {
-                        let stem = bank.rsplit('.').nth(1).unwrap_or(bank);
-                        name = format!("{}__{}.wav", safe(&s.name), safe(stem));
-                        if !seen.insert(name.clone()) {
-                            continue;
-                        }
-                    }
-                    if let Err(e) = zip.start_file(&name, opts) {
-                        errors.push(format!("zip entry {name}: {e}"));
-                        continue;
-                    }
-                    if let Err(e) = zip.write_all(&s.wav) {
-                        errors.push(format!("zip write {name}: {e}"));
-                        continue;
-                    }
-                    written += 1;
-                }
-            }
-            Err(e) => errors.push(format!("bank {bank}: {e}")),
-        }
-
-        let stream_filename = bank
-            .strip_suffix(".dat")
-            .map(|stem| format!("{stem}stream.dat"))
-            .unwrap_or_else(|| format!("{bank}.stream"));
-        let stream_path = folder.join(&stream_filename);
-        if !stream_path.is_file() {
-            continue;
-        }
-        let stream_file = match File::open(&stream_path) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-        let mut sig = match IgFile::open(BufReader::new(stream_file)) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let mut stream_errors: Vec<String> = Vec::new();
-        if let Ok(streams) = extract_stream_sounds(&mut sig, &stream_path, &mut stream_errors) {
-            for s in streams {
-                let mut name = format!("{}.wav", safe(&s.name));
-                if !seen.insert(name.clone()) {
-                    name = format!("{}__stream.wav", safe(&s.name));
-                    if !seen.insert(name.clone()) {
-                        continue;
-                    }
-                }
-                if let Err(e) = zip.start_file(&name, opts) {
-                    errors.push(format!("zip entry {name}: {e}"));
-                    continue;
-                }
-                if let Err(e) = zip.write_all(&s.wav) {
-                    errors.push(format!("zip write {name}: {e}"));
-                    continue;
-                }
-                written += 1;
-            }
-        }
-    }
-
-    zip.finish().map_err(|e| format!("zip finish: {e}"))?;
-    eprintln!(
-        "[bulk-sound-zip] wrote {} sounds to {} (errors={})",
-        written,
-        zip_out_path,
-        errors.len()
-    );
-    Ok(written)
-}
 
 
 #[tauri::command]
@@ -3051,9 +3063,9 @@ fn main() {
             extract_level_sounds,
             extract_one_sound,
             extract_one_stream_sound,
+            bulk_extract_sounds_zip,
             extract_level_stream_sounds,
             extract_raw_streaming_sounds,
-            bulk_extract_sounds_zip,
             get_level_texture_png,
             get_level_textures_bulk,
             list_level_files,

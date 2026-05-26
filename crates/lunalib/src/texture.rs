@@ -58,6 +58,7 @@ impl TexFormat {
         match b {
             // ── Low range — Resistance 2 / older path via assetlookup.dat ──
             0x03 => TexFormat::R5G6B5,
+            0x04 => TexFormat::Rgb5A1,
             0x05 => TexFormat::A8R8G8B8,
             0x06 => TexFormat::Dxt1,
             0x07 => TexFormat::Dxt3,
@@ -76,7 +77,18 @@ impl TexFormat {
             0x87 => TexFormat::Dxt3,
             0x88 => TexFormat::Dxt5,
             0x8B => TexFormat::Rg8,
+            // Linear-tiled compressed block variants — symmetric to the
+            // Morton-tiled 0x86/0x87/0x88 trio. 0xA6 (BC1_LN) is documented
+            // in IT; 0xA7 (BC2_LN) and 0xA8 (BC3_LN) are the obvious
+            // siblings, observed in R2's `packed/game/global_*` PSARC
+            // texture headers where weapon / shared-character textures are
+            // stored. We decode all three with `texpresso` using the same
+            // Bc1/Bc2/Bc3 codecs — the linear vs swizzled difference is in
+            // texel addressing, not block content, and our `decode_dxt`
+            // path already treats the input as a linear block stream.
             0xA6 => TexFormat::Bc1Linear,
+            0xA7 => TexFormat::Dxt3,
+            0xA8 => TexFormat::Dxt5,
 
             other => TexFormat::Unknown(other),
         }
@@ -475,6 +487,15 @@ fn decode_rgba4_morton(raw: &[u8], width: u32, height: u32) -> Vec<u8> {
         rgba[dst + 3] = (a4 << 4) | a4;
     }
     rgba
+}
+
+pub fn decode_image_file_to_png(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let img = image::open(path)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let mut out = Vec::with_capacity(64 * 1024);
+    img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    Ok(out)
 }
 
 pub fn encode_png(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {

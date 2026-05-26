@@ -17,7 +17,7 @@ interface OpenLevelModalProps {
   open: boolean;
   busy: boolean;
   onClose: () => void;
-  onOpen: (folderPath: string) => void;
+  onOpen: (folderPath: string, opts?: { skipCachePrompt?: boolean }) => void;
 }
 
 type GameId = "r1" | "r2" | "r3" | "rc_tod" | "rc_acit" | "rc_ffa" | "rc_a4o";

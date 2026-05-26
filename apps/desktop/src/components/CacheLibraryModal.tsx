@@ -57,6 +57,11 @@ interface CacheLibraryModalProps {
   onUseAsSkybox?: (textureId: number) => void;
   currentSkyboxTextureId?: number | null;
   cubemapDescriptor?: CubemapDescriptor | null;
+  /** Sends the currently-previewed asset to the Asset workbench tab in
+   *  the center panel. Replaces the in-modal fullscreen toggle so users
+   *  get the full layered view + animation scrubber rather than just a
+   *  bigger canvas. */
+  onOpenInWorkbench?: (assetTuidHex: string, kind: "moby" | "tie") => void;
 }
 
 export type LibraryFilter =
@@ -120,6 +125,7 @@ export function CacheLibraryModal({
   onUseAsSkybox,
   currentSkyboxTextureId,
   cubemapDescriptor: _cubemapDescriptor,
+  onOpenInWorkbench,
 }: CacheLibraryModalProps) {
   const [manifest, setManifest] = useState<CacheManifest | null>(null);
   const [manifestError, setManifestError] = useState<string | null>(null);
@@ -312,7 +318,7 @@ export function CacheLibraryModal({
     if (!sounds) return [];
     const needle = search.trim().toLowerCase();
     return sounds.filter((s) => {
-      if (soundCategory !== "all" && classifySound(s.source) !== soundCategory) {
+      if (soundCategory !== "all" && classifySound(s.source, s.name) !== soundCategory) {
         return false;
       }
       return needle
@@ -327,10 +333,33 @@ export function CacheLibraryModal({
     if (filter !== "sound" || !sounds) return counts;
     for (const s of sounds) {
       counts.all++;
-      counts[classifySound(s.source)]++;
+      counts[classifySound(s.source, s.name)]++;
     }
     return counts;
   }, [filter, sounds]);
+
+  // Why: tabs whose underlying dataset is empty just clutter the
+  // toolbar. Compute counts independent of the active filter so we
+  // can hide them. Keep tabs visible while the manifest is still
+  // loading (counts all zero) — otherwise the whole strip blanks
+  // out for a beat on every modal open.
+  const tabCounts = useMemo(() => {
+    const c = { moby: 0, tie: 0, detail: 0, texture: 0, sound: 0, sky: 0 };
+    if (manifest) {
+      for (const e of manifest.entries) {
+        if (e.kind === "moby") c.moby++;
+        else if (e.kind === "tie") c.tie++;
+        else if (e.kind === "detail") c.detail++;
+        else if (e.kind === "texture") c.texture++;
+        else if (e.kind === "sky") c.sky++;
+      }
+    }
+    if (sounds) c.sound = sounds.length;
+    return c;
+  }, [manifest, sounds]);
+  const manifestReady = manifest != null;
+  const shouldShowTab = (kind: keyof typeof tabCounts) =>
+    !manifestReady || tabCounts[kind] > 0;
 
 
   useEffect(() => {
@@ -514,6 +543,23 @@ export function CacheLibraryModal({
       setSelectedSoundKey(null);
     }
   }, [filter, soundRows, selectedSoundKey]);
+
+  // Why: arrow-key navigation can step into a sound on a different
+  // page than the one currently visible, which played the wrong-looking
+  // track (active row is off-screen, the visible page still shows
+  // unrelated rows). Whenever the selection changes, sync the page
+  // forward/back to whichever page actually contains that row. Covers
+  // arrow-key nav, modal-init via initialSoundKey, and any future
+  // programmatic select.
+  useEffect(() => {
+    if (filter !== "sound" || !selectedSoundKey) return;
+    const idx = soundRows.findIndex(
+      (s) => `${s.source}-${s.index}-${s.name}` === selectedSoundKey,
+    );
+    if (idx < 0) return;
+    const targetPage = Math.floor(idx / SOUND_PAGE_SIZE);
+    if (targetPage !== soundPage) setSoundPage(targetPage);
+  }, [filter, selectedSoundKey, soundRows, soundPage, SOUND_PAGE_SIZE]);
 
   const [decodedSoundCache, setDecodedSoundCache] = useState<
     Map<string, ExtractedSound>
@@ -792,6 +838,34 @@ export function CacheLibraryModal({
     }
   }, [folder, soundMulti, sounds, decodedSoundCache]);
 
+  /// Pack every bank + stream sound in the level into a single .zip.
+  /// Doesn't honor the multi-select set — this is the "give me
+  /// everything" action. Multi-select still uses the existing
+  /// folder-output flow above so users can pick subsets when they want.
+  const handleBulkExportSoundsZip = useCallback(async () => {
+    if (!folder) return;
+    setBulkBusy(true);
+    setBulkStatus("Picking output zip…");
+    try {
+      const out = (await saveDialog({
+        title: "Save all sounds as .zip",
+        defaultPath: "sounds.zip",
+        filters: [{ name: "Zip archive", extensions: ["zip"] }],
+      })) as string | null;
+      if (!out) {
+        setBulkStatus(null);
+        return;
+      }
+      setBulkStatus("Packing all sounds into zip…");
+      const written = await bulkExtractSoundsZip(folder, out);
+      setBulkStatus(`Wrote ${written.toLocaleString()} WAVs to ${out}`);
+    } catch (e) {
+      setBulkStatus(`Zip export failed: ${String(e)}`);
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [folder]);
+
   const handleExportTexture = useCallback(
     async (format: "png" | "dds") => {
       if (!folder || !selectedTextureId) return;
@@ -1051,60 +1125,72 @@ export function CacheLibraryModal({
       subheader={
         <div className="cache-library-subheader">
           <div className="cache-library-tabs cache-library-tabs--full" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={filter === "moby"}
-              className={`cache-library-tab ${filter === "moby" ? "active" : ""}`}
-              onClick={() => setFilter("moby")}
-            >
-              Mobys
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={filter === "tie"}
-              className={`cache-library-tab ${filter === "tie" ? "active" : ""}`}
-              onClick={() => setFilter("tie")}
-            >
-              Ties
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={filter === "detail"}
-              className={`cache-library-tab cache-library-tab--detail ${filter === "detail" ? "active" : ""}`}
-              onClick={() => setFilter("detail")}
-            >
-              Details
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={filter === "texture"}
-              className={`cache-library-tab ${filter === "texture" ? "active" : ""}`}
-              onClick={() => setFilter("texture")}
-            >
-              Textures
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={filter === "sound"}
-              className={`cache-library-tab ${filter === "sound" ? "active" : ""}`}
-              onClick={() => setFilter("sound")}
-            >
-              Sounds
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={filter === "sky"}
-              className={`cache-library-tab cache-library-tab--sky ${filter === "sky" ? "active" : ""}`}
-              onClick={() => setFilter("sky")}
-            >
-              Cubemap
-            </button>
+            {shouldShowTab("moby") && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={filter === "moby"}
+                className={`cache-library-tab ${filter === "moby" ? "active" : ""}`}
+                onClick={() => setFilter("moby")}
+              >
+                Mobys
+              </button>
+            )}
+            {shouldShowTab("tie") && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={filter === "tie"}
+                className={`cache-library-tab ${filter === "tie" ? "active" : ""}`}
+                onClick={() => setFilter("tie")}
+              >
+                Ties
+              </button>
+            )}
+            {shouldShowTab("detail") && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={filter === "detail"}
+                className={`cache-library-tab cache-library-tab--detail ${filter === "detail" ? "active" : ""}`}
+                onClick={() => setFilter("detail")}
+              >
+                Details
+              </button>
+            )}
+            {shouldShowTab("texture") && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={filter === "texture"}
+                className={`cache-library-tab ${filter === "texture" ? "active" : ""}`}
+                onClick={() => setFilter("texture")}
+              >
+                Textures
+              </button>
+            )}
+            {shouldShowTab("sound") && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={filter === "sound"}
+                className={`cache-library-tab ${filter === "sound" ? "active" : ""}`}
+                onClick={() => setFilter("sound")}
+              >
+                Sounds
+              </button>
+            )}
+            {shouldShowTab("sky") && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={filter === "sky"}
+                className={`cache-library-tab cache-library-tab--sky ${filter === "sky" ? "active" : ""}`}
+                onClick={() => setFilter("sky")}
+              >
+                Cubemap
+              </button>
+            )}
           </div>
           <button
             type="button"
@@ -1203,27 +1289,39 @@ export function CacheLibraryModal({
                 )}
               </>
             ))}
-          {filter === "sound" &&
-            (soundMulti.size > 1 ? (
+          {filter === "sound" && (
+            <>
               <Button
-                variant="primary"
                 icon={Download}
-                onClick={() => void handleBulkExportSounds()}
+                onClick={() => void handleBulkExportSoundsZip()}
                 disabled={!folder || bulkBusy}
                 loading={bulkBusy}
+                title="Pack every sound + music + dialog stream into a single .zip"
               >
-                {bulkBusy ? "Exporting…" : `Save ${soundMulti.size} WAVs`}
+                {bulkBusy ? "Packing…" : "Extract all → .zip"}
               </Button>
-            ) : (
-              <Button
-                variant="primary"
-                icon={Download}
-                onClick={() => void handleExportSound()}
-                disabled={!selectedExtractedSound}
-              >
-                Save WAV
-              </Button>
-            ))}
+              {soundMulti.size > 1 ? (
+                <Button
+                  variant="primary"
+                  icon={Download}
+                  onClick={() => void handleBulkExportSounds()}
+                  disabled={!folder || bulkBusy}
+                  loading={bulkBusy}
+                >
+                  {bulkBusy ? "Exporting…" : `Save ${soundMulti.size} WAVs`}
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  icon={Download}
+                  onClick={() => void handleExportSound()}
+                  disabled={!selectedExtractedSound}
+                >
+                  Save WAV
+                </Button>
+              )}
+            </>
+          )}
         </>
       }
     >
@@ -1584,58 +1682,45 @@ export function CacheLibraryModal({
                   );
                 })}
               </ul>
-              {(soundDecoding || soundsError || nowPlaying || selectedSoundEntry) && (
-                <div className="cache-sound-playlist-dock">
-                  {soundDecoding && !nowPlaying && (
-                    <div className="cache-sound-loading">
-                      <span className="cache-sound-loading-spinner" aria-hidden />
-                      <span className="dim small">
-                        Decoding bank — first click on this level may take a few
-                        seconds…
-                      </span>
-                    </div>
-                  )}
-                  {soundsError && !soundDecoding && (
-                    <div className="cache-sound-error">
-                      <strong className="small">Sound not playable yet</strong>
-                      <pre
-                        className="mono small"
-                        style={{
-                          marginTop: 6,
-                          whiteSpace: "pre-wrap",
-                          color: "var(--text-3)",
-                        }}
-                      >
-                        {soundsError}
-                      </pre>
-                    </div>
-                  )}
-                  {nowPlaying && (
-                    <SoundPlayer
-                      nowPlaying={nowPlaying}
-                      onClose={() => {
-                        setNowPlaying((prev) => {
-                          if (prev) {
-                            prev.audio.pause();
-                            URL.revokeObjectURL(prev.blobUrl);
-                          }
-                          return null;
-                        });
-                        setSelectedSoundKey(null);
+              <div className="cache-sound-playlist-dock">
+                {soundDecoding && !nowPlaying && (
+                  <div className="cache-sound-loading">
+                    <span className="cache-sound-loading-spinner" aria-hidden />
+                    <span className="dim small">
+                      Decoding bank — first click on this level may take a few
+                      seconds…
+                    </span>
+                  </div>
+                )}
+                {soundsError && !soundDecoding && (
+                  <div className="cache-sound-error">
+                    <strong className="small">Sound not playable yet</strong>
+                    <pre
+                      className="mono small"
+                      style={{
+                        marginTop: 6,
+                        whiteSpace: "pre-wrap",
+                        color: "var(--text-3)",
                       }}
-                    />
+                    >
+                      {soundsError}
+                    </pre>
+                  </div>
+                )}
+                {/* Player is always mounted now — placeholder when idle,
+                    active when something is selected. Volume is shared
+                    across every track via localStorage. */}
+                <SoundPlayer nowPlaying={nowPlaying} />
+                {!soundDecoding &&
+                  !nowPlaying &&
+                  !soundsError &&
+                  selectedSoundEntry?.kind === "stream-missing" && (
+                    <div className="dim small" style={{ padding: 12 }}>
+                      Streaming sibling not on disk — extract the level's
+                      streaming files first.
+                    </div>
                   )}
-                  {!soundDecoding &&
-                    !nowPlaying &&
-                    !soundsError &&
-                    selectedSoundEntry?.kind === "stream-missing" && (
-                      <div className="dim small" style={{ padding: 12 }}>
-                        Streaming sibling not on disk — extract the level's
-                        streaming files first.
-                      </div>
-                    )}
-                </div>
-              )}
+              </div>
               {soundRows.length > SOUND_PAGE_SIZE && (
                 <Paginator
                   currentPage={soundSafePage}
@@ -1750,9 +1835,28 @@ export function CacheLibraryModal({
                     <button
                       type="button"
                       className="btn small cache-library-nav-btn"
-                      onClick={() => setFullscreen(true)}
-                      title="Fullscreen (Esc to exit)"
-                      aria-label="Fullscreen"
+                      onClick={() => {
+                        // Why: user prefers the layered Asset workbench
+                        // tab over the in-modal fullscreen — full submesh
+                        // list, texture thumbnails, and animation
+                        // scrubber. Falls back to the old fullscreen
+                        // behavior if the host didn't pass the callback.
+                        if (
+                          onOpenInWorkbench &&
+                          (filter === "moby" || filter === "tie") &&
+                          selectedAsset
+                        ) {
+                          const tuid = selectedAsset.asset_tuid
+                            .split("#")[0];
+                          if (tuid) {
+                            onOpenInWorkbench(tuid, filter);
+                            return;
+                          }
+                        }
+                        setFullscreen(true);
+                      }}
+                      title="Open in Asset workbench"
+                      aria-label="Open in Asset workbench"
                     >
                       <Maximize2 size={12} />
                     </button>

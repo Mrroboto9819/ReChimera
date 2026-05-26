@@ -22,7 +22,8 @@
     "hierarchy": "Jerarquía",
     "inspector": "Inspector",
     "console": "Consola",
-    "viewport": "Vista"
+    "viewport": "Vista",
+    "assetWorkbench": "Asset"
   },
   "tabs": {
     "dropMove": "Mover a este panel",

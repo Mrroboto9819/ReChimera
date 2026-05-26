@@ -896,11 +896,27 @@ export type SoundCategory = "sfx" | "dialog" | "music";
 ///     boundary (e.g. `mus_intro`, `level_mus`, `mus.bnk`) so we don't
 ///     match unrelated words that happen to contain those letters.
 ///   - `bgm` / `theme` / `ost` are common game-music tags.
-const MUSIC_PATTERN = /(^|[^a-z])(music|mus|bgm|theme|ost)([^a-z]|$)/;
-export function classifySound(source: string): SoundCategory {
+// Why: only match tokens that almost always mean music in Insomniac asset
+// naming. We previously had `mus` and `ost` here too, but they false-
+// positive on compound names — `wep_sharpshooter_fire_mono_ost_dko` is a
+// weapon SFX, not music, but it has `_ost_` in it; `mus` similarly
+// trips on `mus`-containing word fragments. Sticking to `music` / `bgm`
+// / `theme` matches every real R2 music track we've seen
+// (`music_lxx_good4_080809_stg`, `music_*`) without dragging in SFX.
+const MUSIC_PATTERN = /(^|[^a-z])(music|bgm|theme)([^a-z]|$)/;
+export function classifySound(source: string, name?: string): SoundCategory {
   const s = source.toLowerCase();
   if (s.includes("dialogue") || s.includes("voice")) return "dialog";
   if (MUSIC_PATTERN.test(s)) return "music";
+  // Why: a sound's source bank ("resident_sound.dat" etc.) doesn't
+  // always declare music vs. sfx — R2 mixes streaming music tracks
+  // (`music_lxx_good4_080809_stg`) into the general resident_sound
+  // bank. Fall through to the sound's own name so per-track music
+  // overlays still land in the Music tab.
+  if (name) {
+    const n = name.toLowerCase();
+    if (MUSIC_PATTERN.test(n)) return "music";
+  }
   return "sfx";
 }
 
@@ -953,6 +969,20 @@ export const extractLevelSounds = (level_folder: string) =>
     levelFolder: level_folder,
   });
 
+/// Pack every bank + stream sound the level has into a single .zip at
+/// the given path. Returns the count of WAVs written. Re-extracts from
+/// source banks each call — no cache lookup, but bank decoding is
+/// fast enough that a typical level (1-5 banks, ~5k sounds) finishes
+/// in under a second on modern disks.
+export const bulkExtractSoundsZip = (
+  level_folder: string,
+  zip_out_path: string,
+) =>
+  invoke<number>("bulk_extract_sounds_zip", {
+    levelFolder: level_folder,
+    zipOutPath: zip_out_path,
+  });
+
 export const extractOneSound = (
   level_folder: string,
   name: string,
@@ -994,17 +1024,6 @@ export const extractRawStreamingSounds = (level_folder: string, stream_filename:
     streamFilename: stream_filename,
   });
 
-/** Walk every sound bank + matching stream sidecar in the level folder,
- *  decode every sound, and pack them all into a single .zip at the
- *  given path. Returns the count of WAVs written. */
-export const bulkExtractSoundsZip = (
-  level_folder: string,
-  zip_out_path: string,
-) =>
-  invoke<number>("bulk_extract_sounds_zip", {
-    levelFolder: level_folder,
-    zipOutPath: zip_out_path,
-  });
 
 
 
@@ -1242,6 +1261,11 @@ export async function r2ReadScaleformImage(
   return new Blob([buf], { type: "image/png" });
 }
 
+/// Copy a user-supplied PNG/JPEG into the wizard's external-thumbnail
+/// cache directory and return the safe filename to persist in
+/// localStorage. Used to ingest screenshots / RSX-Debugger-saved
+/// textures so they show up alongside the scaleform sprites as
+/// pickable map thumbnails.
 export const r2ImportThumbnail = (
   usrdir: string,
   sourcePath: string,
@@ -1262,6 +1286,9 @@ export async function r2ReadImportedThumbnail(
   return new Blob([buf], { type: "image/png" });
 }
 
+/// Decode a scaleform image then crop to a rectangle, return as PNG Blob.
+/// Used to surface individual chapter cards from atlas files like
+/// `campaignload_id.dds` without parsing the parent SWF.
 export async function r2ReadScaleformImageCrop(
   usrdir: string,
   fileName: string,

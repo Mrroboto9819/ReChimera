@@ -58,7 +58,7 @@ pub fn read_shaders_rfom(level_folder: &Path) -> Result<HashMap<u64, ShaderInfo>
         let albedo = main_ig.stream.read_u32()?;
         let normal = main_ig.stream.read_u32()?;
         let special = main_ig.stream.read_u32()?;
-        let _detail = main_ig.stream.read_u32()?;
+        let detail = main_ig.stream.read_u32()?;
 
         out.insert(
             i,
@@ -67,6 +67,7 @@ pub fn read_shaders_rfom(level_folder: &Path) -> Result<HashMap<u64, ShaderInfo>
                 albedo_tex_id: nonzero(albedo),
                 normal_tex_id: nonzero(normal),
                 expensive_tex_id: nonzero(special),
+                detail_tex_id: nonzero(detail),
             },
         );
     }

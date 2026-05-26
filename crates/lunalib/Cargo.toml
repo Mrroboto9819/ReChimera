@@ -13,7 +13,7 @@ byteorder.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
 texpresso = "2"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "tga", "jpeg", "dds"] }
 # Native GLB writer — produces self-contained `.glb` files per moby/tie
 # so the FE's `GLTFLoader` can render them directly (mirrors IT's
 # extract_assets workflow). Geometry first, then skeleton + anims +

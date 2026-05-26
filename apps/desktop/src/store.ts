@@ -157,7 +157,12 @@ export const {
 } = layoutSlice.actions;
 
 export type PanelId = "left" | "right" | "bottom" | "center";
-export type ViewId = "hierarchy" | "inspector" | "console" | "viewport";
+export type ViewId =
+  | "hierarchy"
+  | "inspector"
+  | "console"
+  | "viewport"
+  | "assetWorkbench";
 
 export interface PanelLayout {
   tabs: ViewId[];

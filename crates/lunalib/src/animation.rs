@@ -89,6 +89,21 @@ impl AnimationHeader {
     pub const fn is_packed_frames(&self) -> bool {
         self.flags & 0x04 != 0
     }
+
+    /// Mirror IT's `FByteswapper<Animation>` (serialize.cpp:660): non-packed
+    /// clips have their on-disk `frameStride` rounded UP to a 128-byte
+    /// boundary before any decoder indexes frame data. Skipping this makes
+    /// every frame after the first read from a misaligned offset, producing
+    /// garbage rotations/translations that compound over the clip — symptom
+    /// is "bones move but mesh detaches from rig" on long clips like
+    /// `hyb_death_crouch_sighted_f` (adv_hybrid) and most trex clips.
+    /// Packed-frames clips (flag 0x04) are stored tightly and must NOT be
+    /// padded.
+    pub fn apply_frame_stride_padding(&mut self) {
+        if !self.is_packed_frames() {
+            self.frame_stride = (self.frame_stride.saturating_add(0x7F)) & 0xFF80;
+        }
+    }
 }
 
 pub fn read_animation_header<R: Read + Seek>(
