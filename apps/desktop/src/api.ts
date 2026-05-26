@@ -994,6 +994,18 @@ export const extractRawStreamingSounds = (level_folder: string, stream_filename:
     streamFilename: stream_filename,
   });
 
+/** Walk every sound bank + matching stream sidecar in the level folder,
+ *  decode every sound, and pack them all into a single .zip at the
+ *  given path. Returns the count of WAVs written. */
+export const bulkExtractSoundsZip = (
+  level_folder: string,
+  zip_out_path: string,
+) =>
+  invoke<number>("bulk_extract_sounds_zip", {
+    levelFolder: level_folder,
+    zipOutPath: zip_out_path,
+  });
+
 
 
 
@@ -1146,4 +1158,123 @@ export function psarcExtractStream(
   const ch = new Channel<PsarcEvent>();
   ch.onmessage = onEvent;
   return invoke<void>("psarc_extract_stream", { input, output, onEvent: ch });
+}
+
+export type R2PsarcState = "ready" | "not_extracted" | "missing";
+
+export interface R2SetupStatus {
+  is_usrdir: boolean;
+  global_cached: R2PsarcState;
+  global_uncached: R2PsarcState;
+  level_folder_count: number;
+}
+
+export type R2MapCategory = "campaign" | "multiplayer" | "coop" | "lobby" | "other";
+
+export interface R2MapInfo {
+  id: string;
+  display_name: string;
+  category: R2MapCategory;
+  ready: boolean;
+  psarc_present: boolean;
+}
+
+export type R2ExtractEvent =
+  | { type: "psarc_start"; psarc: string; total: number }
+  | { type: "psarc_progress"; psarc: string; current: number; name: string }
+  | { type: "psarc_done"; psarc: string; skipped: boolean }
+  | { type: "done" }
+  | { type: "warning"; message: string }
+  | { type: "error"; message: string };
+
+export const r2SetupCheck = (usrdir: string) =>
+  invoke<R2SetupStatus>("r2_setup_check", { usrdir });
+
+export const r2ListMaps = (usrdir: string) =>
+  invoke<R2MapInfo[]>("r2_list_maps", { usrdir });
+
+export function r2ExtractGlobals(
+  usrdir: string,
+  onEvent: (e: R2ExtractEvent) => void,
+): Promise<void> {
+  const ch = new Channel<R2ExtractEvent>();
+  ch.onmessage = onEvent;
+  return invoke<void>("r2_extract_globals", { usrdir, onEvent: ch });
+}
+
+export function r2ExtractLevel(
+  usrdir: string,
+  mapId: string,
+  onEvent: (e: R2ExtractEvent) => void,
+): Promise<void> {
+  const ch = new Channel<R2ExtractEvent>();
+  ch.onmessage = onEvent;
+  return invoke<void>("r2_extract_level", { usrdir, mapId, onEvent: ch });
+}
+
+export const r2LevelOpenPath = (usrdir: string, mapId: string) =>
+  invoke<string>("r2_level_open_path", { usrdir, mapId });
+
+export const r2CacheNeedsRebuild = (usrdir: string, mapId: string) =>
+  invoke<boolean>("r2_cache_needs_rebuild", { usrdir, mapId });
+
+export interface R2ThumbnailProbe {
+  matches: Record<string, string[]>;
+  top_level_dirs: string[];
+  image_extensions_seen: string[];
+  scanned_file_count: number;
+  truncated: boolean;
+}
+
+export const r2ProbeLevelThumbnails = (usrdir: string, mapIds: string[]) =>
+  invoke<R2ThumbnailProbe>("r2_probe_level_thumbnails", { usrdir, mapIds });
+
+export async function r2ReadScaleformImage(
+  usrdir: string,
+  fileName: string,
+): Promise<Blob> {
+  const bytes = await invoke<number[] | ArrayBuffer>("r2_read_scaleform_image", {
+    usrdir,
+    fileName,
+  });
+  const buf =
+    bytes instanceof ArrayBuffer ? bytes : new Uint8Array(bytes).buffer;
+  return new Blob([buf], { type: "image/png" });
+}
+
+export const r2ImportThumbnail = (
+  usrdir: string,
+  sourcePath: string,
+  label: string,
+) =>
+  invoke<string>("r2_import_thumbnail", { usrdir, sourcePath, label });
+
+export async function r2ReadImportedThumbnail(
+  usrdir: string,
+  fileName: string,
+): Promise<Blob> {
+  const bytes = await invoke<number[] | ArrayBuffer>(
+    "r2_read_imported_thumbnail",
+    { usrdir, fileName },
+  );
+  const buf =
+    bytes instanceof ArrayBuffer ? bytes : new Uint8Array(bytes).buffer;
+  return new Blob([buf], { type: "image/png" });
+}
+
+export async function r2ReadScaleformImageCrop(
+  usrdir: string,
+  fileName: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): Promise<Blob> {
+  const bytes = await invoke<number[] | ArrayBuffer>(
+    "r2_read_scaleform_image_crop",
+    { usrdir, fileName, x, y, w, h },
+  );
+  const buf =
+    bytes instanceof ArrayBuffer ? bytes : new Uint8Array(bytes).buffer;
+  return new Blob([buf], { type: "image/png" });
 }

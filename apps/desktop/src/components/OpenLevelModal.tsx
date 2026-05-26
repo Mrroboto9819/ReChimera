@@ -3,9 +3,15 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, Archive, File, Folder, Package, Lock, X } from "lucide-react";
 import gsap from "gsap";
 import { Modal } from "./Modal";
+import {
+  FallbackImage,
+  franchisePlaceholder,
+  levelThumbCandidatesFromPath,
+} from "./FallbackImage";
 import { Button } from "../ui";
 import { useFileDrop } from "../useFileDrop";
 import { psarcExtractStream } from "../api";
+import { R2Wizard } from "./R2Wizard";
 
 interface OpenLevelModalProps {
   open: boolean;
@@ -267,6 +273,7 @@ function lastTwoSegments(path: string): string {
   return parts.slice(-2).join(" / ") || norm;
 }
 
+
 const FRANCHISE_TAB_KEY = "rechimera.wizardFranchiseTab";
 
 function loadFranchiseTab(): Franchise {
@@ -295,6 +302,7 @@ export function OpenLevelModal({
 }: OpenLevelModalProps) {
   const [step, setStep] = useState<Step>("game");
   const [game, setGame] = useState<GameId | null>(null);
+  const [r2WizardOpen, setR2WizardOpen] = useState(false);
   const [path, setPath] = useState("");
   const [warning, setWarning] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
@@ -320,6 +328,7 @@ export function OpenLevelModal({
       setPsarcError(null);
       setPsarcProgress(null);
       setPsarcDone(false);
+      setR2WizardOpen(false);
     }
   }, [open]);
 
@@ -338,6 +347,13 @@ export function OpenLevelModal({
     setPsarcError(null);
     setPsarcProgress(null);
     setPsarcDone(false);
+    // Any V2 game (assetlookup.dat USRDIR layout) shares the same
+    // wizard flow: USRDIR → globals → maps → level.
+    const spec = GAMES.find((g) => g.id === id);
+    if (spec && spec.entryFile === "assetlookup.dat" && spec.supported) {
+      setR2WizardOpen(true);
+      return;
+    }
     setStep("source");
   }, []);
 
@@ -618,6 +634,27 @@ export function OpenLevelModal({
     }
     setStep("folder");
   }, [psarcOutput]);
+
+  if (r2WizardOpen && game) {
+    const wizardSpec = GAMES.find((g) => g.id === game);
+    const wizardLabel = wizardSpec?.short ?? "R2";
+    return (
+      <R2Wizard
+        open={open}
+        busy={busy}
+        gameId={game}
+        gameLabel={wizardLabel}
+        onClose={() => {
+          setR2WizardOpen(false);
+          onClose();
+        }}
+        onOpen={(folder) => {
+          pushRecent(game, folder);
+          onOpen(folder);
+        }}
+      />
+    );
+  }
 
   return (
     <Modal
@@ -1142,7 +1179,11 @@ export function OpenLevelModal({
             <div className="open-level-recent">
               <div className="open-level-section-title small dim">Recent</div>
               <ul className="open-level-recent-list">
-                {recent.map((folder) => (
+                {recent.map((folder) => {
+                  const candidates = game
+                    ? levelThumbCandidatesFromPath(folder, game)
+                    : [];
+                  return (
                   <li key={folder} className="open-level-recent-item">
                     <button
                       type="button"
@@ -1151,6 +1192,13 @@ export function OpenLevelModal({
                       disabled={busy}
                       title={folder}
                     >
+                      <FallbackImage
+                        candidates={candidates}
+                        alt=""
+                        className="open-level-recent-thumb"
+                        placeholder={game ? franchisePlaceholder(game) : undefined}
+                        placeholderLabel="No image"
+                      />
                       <span className="open-level-recent-name">
                         {lastTwoSegments(folder)}
                       </span>
@@ -1168,7 +1216,8 @@ export function OpenLevelModal({
                       <X size={14} strokeWidth={2} />
                     </button>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
           )}

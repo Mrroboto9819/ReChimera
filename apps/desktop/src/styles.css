@@ -2465,10 +2465,11 @@ textarea {
 .open-level-recent-btn {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 2px 10px;
+  align-items: center;
   padding: 8px 12px;
   background: transparent;
   border: 1px solid transparent;
@@ -2477,6 +2478,14 @@ textarea {
   text-align: left;
   cursor: pointer;
   font: inherit;
+}
+.open-level-recent-thumb {
+  grid-row: 1 / 3;
+  width: 56px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: var(--surface-200);
 }
 .open-level-recent-btn:hover:not(:disabled) {
   background: var(--surface-200);
@@ -5307,7 +5316,7 @@ textarea {
   list-style: none;
   margin: 0;
   padding: 4px 0;
-  background: var(--surface);
+  background: var(--surface-100);
   border: 1px solid var(--hairline);
   border-radius: 6px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
@@ -5936,7 +5945,7 @@ textarea {
   transition: background 0.2s ease;
 }
 .wizard-step.is-done:not(:last-child)::after {
-  background: #ef4444;
+  background: var(--brand-color);
 }
 .wizard-step-num {
   display: inline-flex;
@@ -5961,9 +5970,9 @@ textarea {
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
 }
 .wizard-step.is-done .wizard-step-num {
-  background: #ef4444;
+  background: var(--brand-color);
   color: #ffffff;
-  border-color: #ef4444;
+  border-color: var(--brand-color);
 }
 .wizard-step.is-active {
   color: var(--text);
@@ -6293,4 +6302,2393 @@ textarea {
 .game-franchise-tab.active .game-franchise-tab-count {
   background: hsla(202, 100%, 67%, 0.22);
   color: var(--text-1);
+}
+
+/* ───────────────────────────────────────────────────────────────────
+   HUD theme — Resistance-style pause-menu modal skin
+   Activated by adding `theme="hud"` on <Modal>. Square corners, amber
+   accents, breadcrumb-colon header, four L-shaped corner brackets.
+   ─────────────────────────────────────────────────────────────────── */
+
+:root {
+  --hud-bg: #0d0d0c;
+  --hud-bg-edge: #050504;
+  --hud-amber: #d4b860;
+  --hud-amber-strong: #f0d488;
+  --hud-amber-dim: rgba(212, 184, 96, 0.32);
+  --hud-amber-bar: rgba(170, 138, 60, 0.85);
+  --hud-text: #ece9df;
+  --hud-text-dim: #a09a8a;
+  --hud-rule: rgba(212, 184, 96, 0.25);
+}
+
+.modal-dialog--hud {
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(212, 184, 96, 0.04), transparent 60%),
+    linear-gradient(180deg, var(--hud-bg) 0%, var(--hud-bg-edge) 100%);
+  background-image:
+    radial-gradient(120% 80% at 50% 0%, rgba(212, 184, 96, 0.04), transparent 60%),
+    linear-gradient(180deg, var(--hud-bg) 0%, var(--hud-bg-edge) 100%);
+  border: 1px solid var(--hud-amber-dim);
+  border-radius: 0;
+  color: var(--hud-text);
+  font-family: "Inter", "Roboto Condensed", system-ui, sans-serif;
+  position: relative;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.modal-dialog--hud .hud-corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+  z-index: 2;
+}
+.modal-dialog--hud .hud-corner--tl {
+  top: -1px; left: -1px;
+  border-top: 2px solid var(--hud-amber);
+  border-left: 2px solid var(--hud-amber);
+}
+.modal-dialog--hud .hud-corner--tr {
+  top: -1px; right: -1px;
+  border-top: 2px solid var(--hud-amber);
+  border-right: 2px solid var(--hud-amber);
+}
+.modal-dialog--hud .hud-corner--bl {
+  bottom: -1px; left: -1px;
+  border-bottom: 2px solid var(--hud-amber);
+  border-left: 2px solid var(--hud-amber);
+}
+.modal-dialog--hud .hud-corner--br {
+  bottom: -1px; right: -1px;
+  border-bottom: 2px solid var(--hud-amber);
+  border-right: 2px solid var(--hud-amber);
+}
+
+.modal-dialog--hud .modal-header {
+  padding: 18px 28px 14px;
+  border-bottom: 1px solid var(--hud-rule);
+  background: transparent;
+}
+
+.modal-dialog--hud .modal-title {
+  color: var(--hud-amber);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  font-family: "Inter", "Roboto Condensed", system-ui, sans-serif;
+}
+
+.modal-dialog--hud .modal-subtitle {
+  color: var(--hud-text-dim);
+  font-size: 10.5px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
+.modal-dialog--hud .modal-close {
+  color: var(--hud-amber);
+  border-radius: 0;
+  border: 1px solid transparent;
+  font-size: 16px;
+  font-weight: 300;
+}
+.modal-dialog--hud .modal-close:hover {
+  background: rgba(212, 184, 96, 0.12);
+  border-color: var(--hud-amber-dim);
+  color: var(--hud-amber-strong);
+}
+
+.modal-dialog--hud .modal-body {
+  color: var(--hud-text);
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  padding: 22px 28px;
+}
+
+.modal-dialog--hud .modal-subheader {
+  border-bottom: 1px solid var(--hud-rule);
+  background: rgba(212, 184, 96, 0.04);
+  padding: 14px 28px;
+}
+
+.modal-dialog--hud .modal-footer {
+  border-top: 1px solid var(--hud-rule);
+  padding: 14px 28px 18px;
+  background: transparent;
+  gap: 10px;
+}
+
+/* Stack body sections vertically with reference-matching breathing room */
+.modal-dialog--hud .modal-body > * + * {
+  margin-top: 14px;
+}
+
+.modal-dialog--hud .btn,
+.modal-dialog--hud button:not(.modal-close) {
+  background: transparent;
+  border: 1px solid var(--hud-amber-dim);
+  border-radius: 0;
+  color: var(--hud-text);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 12px;
+  padding: 8px 16px;
+  font-weight: 500;
+  transition: background 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+}
+.modal-dialog--hud .btn:hover,
+.modal-dialog--hud button:not(.modal-close):hover {
+  background: var(--hud-amber-bar);
+  border-color: var(--hud-amber);
+  color: #fff;
+}
+.modal-dialog--hud .btn:disabled,
+.modal-dialog--hud button:not(.modal-close):disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* HUD theme inner-content overrides — re-color step bar / source cards /
+   info banner / chip tags so they match the amber palette instead of
+   the app's default red+blue+green accents. */
+
+.modal-dialog--hud {
+  --accent-blue: var(--hud-amber);
+  --accent-red: var(--hud-amber);
+  --accent-green: var(--hud-amber);
+  --accent-yellow: var(--hud-amber);
+  --tint-blue: rgba(212, 184, 96, 0.08);
+  --tint-red: rgba(212, 184, 96, 0.08);
+  --tint-green: rgba(212, 184, 96, 0.08);
+  --tint-yellow: rgba(212, 184, 96, 0.08);
+}
+
+/* Wizard step bar — circles, connectors, labels */
+.modal-dialog--hud .wizard-step-num {
+  background: rgba(0, 0, 0, 0.4);
+  border-color: var(--hud-amber-dim);
+  color: var(--hud-text-dim);
+  border-radius: 50%;
+}
+.modal-dialog--hud .wizard-step.is-active .wizard-step-num {
+  background: rgba(212, 184, 96, 0.18);
+  border-color: var(--hud-amber);
+  color: var(--hud-amber-strong);
+  box-shadow: 0 0 0 3px rgba(212, 184, 96, 0.18);
+}
+.modal-dialog--hud .wizard-step.is-done .wizard-step-num {
+  background: var(--hud-amber);
+  border-color: var(--hud-amber);
+  color: #1a1408;
+}
+.modal-dialog--hud .wizard-step.is-done:not(:last-child)::after {
+  background: var(--hud-amber);
+}
+.modal-dialog--hud .wizard-step.is-active,
+.modal-dialog--hud .wizard-step.is-done {
+  color: var(--hud-text);
+}
+
+/* "Choose source" cards — amber on hover, square corners, amber icons */
+.modal-dialog--hud .open-level-card {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--hud-amber-dim);
+  border-radius: 0;
+  color: var(--hud-text);
+  padding: 16px;
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+.modal-dialog--hud .open-level-card:hover:not(:disabled) {
+  background: rgba(212, 184, 96, 0.08);
+  border-color: var(--hud-amber);
+  transform: none;
+}
+.modal-dialog--hud .open-level-card-icon {
+  color: var(--hud-amber);
+}
+.modal-dialog--hud .open-level-card-icon svg {
+  color: var(--hud-amber);
+  stroke: var(--hud-amber);
+}
+.modal-dialog--hud .open-level-card-title {
+  color: var(--hud-text);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* "Before you start" info banner */
+.modal-dialog--hud .source-info {
+  border: 1px solid var(--hud-amber-dim);
+  background: rgba(212, 184, 96, 0.05);
+  border-radius: 0;
+}
+.modal-dialog--hud .source-info strong {
+  color: var(--hud-amber);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 11px;
+}
+
+/* Game-card tag chip ("R2", "R3" etc.) */
+.modal-dialog--hud .game-card-tag {
+  background: rgba(212, 184, 96, 0.18);
+  color: var(--hud-amber-strong);
+  border-radius: 0;
+}
+
+/* Subheader (where the step bar lives) — kill the blue tint */
+.modal-dialog--hud .modal-subheader {
+  background: rgba(212, 184, 96, 0.03);
+  border-bottom: 1px solid var(--hud-rule);
+}
+
+/* Recent-list thumbs (R2 map images) — keep the rounded thumb but square the row container */
+.modal-dialog--hud .open-level-recent-btn {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid transparent;
+  border-radius: 0;
+}
+.modal-dialog--hud .open-level-recent-btn:hover:not(:disabled) {
+  background: rgba(212, 184, 96, 0.08);
+  border-color: var(--hud-amber-dim);
+}
+.r2-step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.r2-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.r2-status-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.r2-status-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+}
+.r2-status-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.r2-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.r2-badge-ok {
+  background: color-mix(in srgb, var(--accent-green) 18%, transparent);
+  color: var(--accent-green);
+}
+.r2-badge-pending {
+  background: color-mix(in srgb, var(--accent-yellow) 18%, transparent);
+  color: var(--accent-yellow);
+}
+.r2-badge-missing {
+  background: color-mix(in srgb, var(--accent-red) 18%, transparent);
+  color: var(--accent-red);
+}
+.r2-badge-info {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-2);
+}
+
+.r2-extract {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+}
+.r2-extract-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.r2-extract-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.r2-extract-warnings {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  color: var(--accent-yellow);
+}
+.r2-extract-warnings li {
+  margin: 2px 0;
+}
+
+.r2-maps-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.r2-maps-search {
+  flex: 1;
+  max-width: 320px;
+}
+.r2-maps-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.r2-maps-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.r2-maps-group-title {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+}
+.r2-maps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+.r2-map-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  text-align: left;
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 0;
+  transition: border-color 0.15s, transform 0.1s;
+}
+.r2-map-card:hover {
+  border-color: var(--brand-color);
+  transform: translateY(-1px);
+}
+.r2-map-card.is-disabled {
+  opacity: 0.45;
+}
+.r2-map-card.is-ready {
+  border-color: color-mix(in srgb, var(--accent-green) 45%, var(--border));
+}
+.r2-map-card.is-picking {
+  border-color: var(--brand-color);
+}
+.r2-map-card-body-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.r2-map-card-body-btn:disabled {
+  cursor: not-allowed;
+}
+.r2-map-card-art-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.r2-map-card-thumb-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  appearance: none;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  z-index: 2;
+}
+.r2-map-card-thumb-btn:hover {
+  background: rgba(0, 0, 0, 0.8);
+  border-color: var(--brand-color);
+}
+.r2-map-card-picker {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 3;
+  border-radius: 8px;
+}
+.r2-map-card-picker-head {
+  text-align: center;
+}
+.r2-map-card-picker-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 6px;
+  overflow-y: auto;
+}
+.r2-map-card-picker-tile {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  aspect-ratio: 474 / 206;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.r2-map-card-picker-tile:hover {
+  border-color: var(--brand-color);
+}
+.r2-map-card-picker-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.r2-map-card-picker-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.r2-map-card-picker-clear,
+.r2-map-card-picker-close {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.r2-map-card-picker-clear:hover,
+.r2-map-card-picker-close:hover {
+  color: var(--text-1);
+  border-color: var(--brand-color);
+}
+.r2-map-card-art {
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+  background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+}
+.r2-map-card-art[data-category="campaign"] {
+  background: linear-gradient(135deg, hsl(0, 60%, 30%), hsl(20, 60%, 20%));
+}
+.r2-map-card-art[data-category="coop"] {
+  background: linear-gradient(135deg, hsl(140, 60%, 28%), hsl(170, 60%, 20%));
+}
+.r2-map-card-art[data-category="multiplayer"] {
+  background: linear-gradient(135deg, hsl(210, 65%, 32%), hsl(240, 60%, 22%));
+}
+.r2-map-card-art[data-category="lobby"] {
+  background: linear-gradient(135deg, hsl(280, 50%, 30%), hsl(320, 50%, 22%));
+}
+.r2-map-card-art[data-category="other"] {
+  background: linear-gradient(135deg, hsl(40, 40%, 28%), hsl(60, 40%, 20%));
+}
+.r2-map-card-art-letter {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+.r2-map-card-body {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.r2-map-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.r2-map-card-id {
+  font-size: 10px;
+}
+.r2-map-card-tags {
+  margin-top: 4px;
+}
+
+.r2-probe-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.r2-probe-list {
+  list-style: none;
+  margin: 4px 0 0 12px;
+  padding: 0;
+  word-break: break-all;
+}
+.r2-probe-list li {
+  padding: 1px 0;
+}
+.r2-probe-matches {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+.r2-probe-matches > li {
+  margin-bottom: 8px;
+}
+
+.r2-atlas-panel {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+}
+.r2-atlas-panel > summary {
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+}
+.r2-atlas-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.r2-atlas-item {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.r2-atlas-item img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 4px;
+  background: #111;
+  border: 1px solid var(--border);
+  image-rendering: pixelated;
+}
+.r2-atlas-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--border);
+}
+.r2-atlas-item figcaption {
+  text-align: center;
+  word-break: break-all;
+}
+
+
+/* ===== AssetWorkbench (assetWorkbench tab) ===== */
+.r2-hud-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  min-height: 420px;
+  background: transparent;
+}
+
+.r2-hud-list {
+  border-right: 1px solid var(--hud-rule);
+  padding: 8px 0;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.r2-hud-group-title {
+  color: var(--hud-text-dim);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 14px 20px 6px;
+}
+
+.r2-map-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--hud-text);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-weight: 500;
+  transition: background 100ms ease-out, color 100ms ease-out;
+  position: relative;
+}
+.r2-map-row:hover {
+  background: rgba(212, 184, 96, 0.08);
+  color: var(--hud-amber-strong);
+}
+.r2-map-row.is-active {
+  background: var(--hud-amber-bar);
+  color: #fff;
+  font-weight: 600;
+}
+.r2-map-row.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--hud-amber-strong);
+}
+.r2-map-row .r2-map-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.r2-map-row .r2-map-row-state {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--hud-amber);
+  opacity: 0.7;
+}
+.r2-map-row.is-active .r2-map-row-state {
+  color: rgba(255, 255, 255, 0.85);
+  opacity: 1;
+}
+.r2-map-row.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.r2-hud-preview {
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.r2-hud-preview-art {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #050505;
+  border: 1px solid var(--hud-rule);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.r2-hud-preview-art img,
+.r2-hud-preview-art .fallback-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.r2-hud-preview-art .fallback-image > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.r2-hud-preview-art-letter {
+  font-size: 96px;
+  color: var(--hud-amber-dim);
+  font-weight: 200;
+}
+.r2-hud-preview-caption {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  color: #fff;
+  font-size: 11px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 4px 8px;
+}
+
+.r2-hud-preview-meta {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px 16px;
+  font-size: 12px;
+}
+.r2-hud-meta-label {
+  color: var(--hud-amber);
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+.r2-hud-meta-value {
+  color: var(--hud-text);
+  letter-spacing: 0.5px;
+}
+.r2-hud-meta-value.mono {
+  font-family: ui-monospace, Consolas, "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--hud-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.r2-hud-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.r2-hud-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--hud-rule);
+  padding: 0 20px;
+  background: transparent;
+}
+.r2-hud-tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 10px 16px;
+  color: var(--hud-text-dim);
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-weight: 500;
+  transition: color 100ms ease-out, border-color 100ms ease-out;
+}
+.r2-hud-tab:hover {
+  color: var(--hud-text);
+}
+.r2-hud-tab.is-active {
+  color: var(--hud-amber-strong);
+  border-bottom-color: var(--hud-amber);
+}
+
+/* ───────────────────────────────────────────────────────────────────
+   Resistance 2 skin — app-wide overrides
+   Active when [data-app-skin="resistance2"] is on the document root.
+   Recolors the entire shell (top bar, panels, tabs, lists, buttons)
+   to match the Resistance pause-menu visual language: warm-dark
+   background, amber accents, square corners, tracked uppercase text.
+   ─────────────────────────────────────────────────────────────────── */
+
+:root[data-app-skin="resistance2"] {
+  --bg-app: #0a0a09;
+  --surface-100: #15140f;
+  --surface-200: #1f1d15;
+  --surface-300: #28251a;
+  --hairline: rgba(212, 184, 96, 0.18);
+  --text-1: #ece9df;
+  --text-2: #c9c4b3;
+  --text-3: #908a78;
+  --accent-blue: var(--hud-amber);
+  --accent-red: var(--hud-amber);
+  --accent-green: var(--hud-amber);
+  --accent-yellow: var(--hud-amber);
+  --tint-blue: rgba(212, 184, 96, 0.10);
+  --tint-red: rgba(212, 184, 96, 0.10);
+  --tint-green: rgba(212, 184, 96, 0.10);
+  --tint-yellow: rgba(212, 184, 96, 0.10);
+  --brand-color: var(--hud-amber);
+}
+
+:root[data-app-skin="resistance2"] body {
+  background:
+    radial-gradient(140% 80% at 50% 0%, rgba(212, 184, 96, 0.04), transparent 60%),
+    linear-gradient(180deg, #0c0c0a 0%, #050504 100%);
+}
+
+/* Top bar (menubar) */
+:root[data-app-skin="resistance2"] .menubar {
+  background: rgba(10, 10, 9, 0.85);
+  border-bottom: 1px solid var(--hud-amber-dim);
+}
+:root[data-app-skin="resistance2"] .brand {
+  color: var(--hud-amber);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+:root[data-app-skin="resistance2"] .brand-version {
+  color: var(--hud-text-dim);
+  letter-spacing: 1.5px;
+}
+:root[data-app-skin="resistance2"] .menubar-icon-btn {
+  color: var(--hud-text-dim);
+  border-radius: 0;
+}
+:root[data-app-skin="resistance2"] .menubar-icon-btn:hover {
+  background: rgba(212, 184, 96, 0.10);
+  color: var(--hud-amber-strong);
+}
+:root[data-app-skin="resistance2"] .menubar-icon-btn.active {
+  background: rgba(212, 184, 96, 0.18);
+  color: var(--hud-amber-strong);
+}
+
+/* Tab strip (panel headers) */
+:root[data-app-skin="resistance2"] .tab-strip {
+  background: rgba(8, 8, 7, 0.6);
+  border-bottom: 1px solid var(--hud-amber-dim);
+}
+:root[data-app-skin="resistance2"] .tab-shell {
+  border-bottom: 2px solid transparent;
+}
+:root[data-app-skin="resistance2"] .tab-shell.active {
+  border-bottom-color: var(--hud-amber);
+  background: rgba(212, 184, 96, 0.06);
+}
+:root[data-app-skin="resistance2"] .tab {
+  color: var(--hud-text-dim);
+  letter-spacing: 2px;
+  font-weight: 500;
+}
+:root[data-app-skin="resistance2"] .tab-shell.active .tab {
+  color: var(--hud-amber-strong);
+}
+:root[data-app-skin="resistance2"] .tab:hover {
+  color: var(--hud-text);
+}
+
+/* Tab add menu (small dropdown) */
+:root[data-app-skin="resistance2"] .tab-add-menu {
+  background: var(--surface-100);
+  border: 1px solid var(--hud-amber-dim);
+  border-radius: 0;
+}
+:root[data-app-skin="resistance2"] .tab-add-menu-item {
+  color: var(--hud-text);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+:root[data-app-skin="resistance2"] .tab-add-menu-item:hover {
+  background: var(--hud-amber-bar);
+  color: #fff;
+}
+
+/* Workspace panels */
+:root[data-app-skin="resistance2"] .workspace,
+:root[data-app-skin="resistance2"] .workspace-pane {
+  background: transparent;
+}
+
+/* Generic .btn — squared + tracked uppercase + amber border */
+:root[data-app-skin="resistance2"] .btn {
+  background: transparent;
+  border: 1px solid var(--hud-amber-dim);
+  border-radius: 0;
+  color: var(--hud-text);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-weight: 500;
+}
+:root[data-app-skin="resistance2"] .btn:hover:not(:disabled) {
+  background: var(--hud-amber-bar);
+  border-color: var(--hud-amber);
+  color: #fff;
+}
+:root[data-app-skin="resistance2"] .btn-primary {
+  background: var(--hud-amber);
+  border-color: var(--hud-amber);
+  color: #1a1408;
+}
+:root[data-app-skin="resistance2"] .btn-primary:hover:not(:disabled) {
+  background: var(--hud-amber-strong);
+  color: #1a1408;
+}
+
+/* Hierarchy / Inspector / list rows — wide amber bar on selected */
+:root[data-app-skin="resistance2"] .row.is-selected,
+:root[data-app-skin="resistance2"] .tree-row.is-selected,
+:root[data-app-skin="resistance2"] li.is-selected,
+:root[data-app-skin="resistance2"] [aria-selected="true"] {
+  background: var(--hud-amber-bar);
+  color: #fff;
+  border-radius: 0;
+}
+
+/* Section headers (e.g. inspector groups) */
+:root[data-app-skin="resistance2"] h1,
+:root[data-app-skin="resistance2"] h2,
+:root[data-app-skin="resistance2"] h3,
+:root[data-app-skin="resistance2"] h4,
+:root[data-app-skin="resistance2"] .section-title,
+:root[data-app-skin="resistance2"] .settings-heading {
+  color: var(--hud-amber);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-weight: 500;
+}
+
+/* Inputs / selects — square + amber border */
+:root[data-app-skin="resistance2"] input[type="text"],
+:root[data-app-skin="resistance2"] input[type="search"],
+:root[data-app-skin="resistance2"] input[type="number"],
+:root[data-app-skin="resistance2"] select,
+:root[data-app-skin="resistance2"] textarea {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--hud-amber-dim);
+  border-radius: 0;
+  color: var(--hud-text);
+}
+:root[data-app-skin="resistance2"] input:focus,
+:root[data-app-skin="resistance2"] select:focus,
+:root[data-app-skin="resistance2"] textarea:focus {
+  outline: none;
+  border-color: var(--hud-amber);
+  box-shadow: 0 0 0 1px var(--hud-amber-dim);
+}
+
+/* StatusBar (bottom) */
+:root[data-app-skin="resistance2"] .status-bar,
+:root[data-app-skin="resistance2"] .statusbar {
+  background: rgba(8, 8, 7, 0.85);
+  border-top: 1px solid var(--hud-amber-dim);
+  color: var(--hud-text-dim);
+  letter-spacing: 1.2px;
+}
+
+/* Splitter handles between panels */
+:root[data-app-skin="resistance2"] [data-panel-resize-handle-id] {
+  background: transparent;
+}
+:root[data-app-skin="resistance2"] [data-panel-resize-handle-id]:hover {
+  background: var(--hud-amber-dim);
+}
+
+/* Select component (custom dropdown) */
+:root[data-app-skin="resistance2"] .select-trigger {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--hud-amber-dim);
+  border-radius: 0;
+  color: var(--hud-text);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 12px;
+}
+:root[data-app-skin="resistance2"] .select-trigger:hover:not(:disabled) {
+  background: rgba(212, 184, 96, 0.10);
+  border-color: var(--hud-amber);
+}
+:root[data-app-skin="resistance2"] .select-trigger-caret {
+  color: var(--hud-amber);
+}
+:root[data-app-skin="resistance2"] .select-popover {
+  background: var(--surface-100);
+  border: 1px solid var(--hud-amber-dim);
+  border-radius: 0;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+:root[data-app-skin="resistance2"] .select-option {
+  color: var(--hud-text);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 12px;
+  border-radius: 0;
+}
+:root[data-app-skin="resistance2"] .select-option:hover:not(.is-disabled) {
+  background: rgba(212, 184, 96, 0.10);
+  color: var(--hud-amber-strong);
+}
+:root[data-app-skin="resistance2"] .select-option.is-selected {
+  background: var(--hud-amber-bar);
+  color: #fff;
+  font-weight: 600;
+}
+:root[data-app-skin="resistance2"] .select-option-hint {
+  color: var(--hud-text-dim);
+}
+
+/* SearchField — reusable, skin-aware search input. */
+.search-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-100);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 6px 10px;
+  min-width: 200px;
+  flex: 0 1 320px;
+  transition: border-color 120ms ease-out, background 120ms ease-out;
+  color: var(--text-2);
+}
+.search-field:hover {
+  border-color: var(--text-3);
+}
+.search-field.is-focused {
+  border-color: var(--accent-blue);
+  background: var(--surface-200);
+}
+.search-field-icon {
+  flex: 0 0 auto;
+  color: var(--text-3);
+}
+.search-field.is-focused .search-field-icon {
+  color: var(--accent-blue);
+}
+.search-field-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12px;
+  padding: 0;
+}
+.search-field-input::placeholder {
+  color: var(--text-3);
+}
+.search-field-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.search-field-clear {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+.search-field-clear:hover {
+  background: var(--surface-300, rgba(255, 255, 255, 0.08));
+  color: var(--text-1);
+}
+
+/* Resistance 2 skin */
+:root[data-app-skin="resistance2"] .search-field {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--hud-amber-dim);
+  border-radius: 0;
+  color: var(--hud-text);
+}
+:root[data-app-skin="resistance2"] .search-field:hover {
+  border-color: var(--hud-amber);
+}
+:root[data-app-skin="resistance2"] .search-field.is-focused {
+  border-color: var(--hud-amber);
+  background: rgba(212, 184, 96, 0.05);
+}
+:root[data-app-skin="resistance2"] .search-field-icon {
+  color: var(--hud-amber);
+}
+:root[data-app-skin="resistance2"] .search-field-input {
+  color: var(--hud-text);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 12px;
+}
+:root[data-app-skin="resistance2"] .search-field-input::placeholder {
+  color: var(--hud-text-dim);
+}
+:root[data-app-skin="resistance2"] .search-field-clear {
+  color: var(--hud-amber);
+  border-radius: 0;
+}
+:root[data-app-skin="resistance2"] .search-field-clear:hover {
+  background: rgba(212, 184, 96, 0.18);
+  color: var(--hud-amber-strong);
+}
+
+/* Progress bars — match in-game XP-bar reference: thin amber outline,
+   small inset, solid amber chunk, fully square. */
+:root[data-app-skin="resistance2"] .cache-progress-bar,
+:root[data-app-skin="resistance2"] .load-progress-bar {
+  height: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--hud-amber);
+  border-radius: 0;
+  padding: 2px;
+  box-shadow: none;
+  overflow: visible;
+  position: relative;
+}
+:root[data-app-skin="resistance2"] .cache-progress-bar-fill,
+:root[data-app-skin="resistance2"] .load-progress-fill {
+  position: relative;
+  inset: auto;
+  height: 100%;
+  background: var(--hud-amber);
+  border-radius: 0;
+  box-shadow: none;
+  transition: width 220ms ease-out;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+   Resistance 3 skin — aged-paper / wartime-journal aesthetic.
+   Warm cream backgrounds, charcoal ink text, deep red accents,
+   serif headings. Selection treatment: bold deeper-red text with a
+   subtle red underline (no amber bar like R2).
+   ─────────────────────────────────────────────────────────────────── */
+
+:root[data-app-skin="resistance3"] {
+  --r3-paper: #dccfae;
+  --r3-paper-light: #e8dec0;
+  --r3-paper-dark: #b8a883;
+  --r3-paper-edge: #9b8a6a;
+  --r3-ink: #2b2620;
+  --r3-ink-soft: #5a4f42;
+  --r3-ink-faint: #7c705e;
+  --r3-red: #8a1f1f;
+  --r3-red-bright: #b03030;
+  --r3-red-dim: rgba(138, 31, 31, 0.32);
+  --r3-rule: rgba(43, 38, 32, 0.22);
+  --r3-serif: "Crimson Text", "Cormorant Garamond", "Playfair Display",
+    "Georgia", "Times New Roman", serif;
+
+  --bg-app: var(--r3-paper);
+  --surface-100: var(--r3-paper-light);
+  --surface-200: var(--r3-paper);
+  --surface-300: var(--r3-paper-dark);
+  --hairline: var(--r3-rule);
+  --text-1: var(--r3-ink);
+  --text-2: var(--r3-ink-soft);
+  --text-3: var(--r3-ink-faint);
+  --accent-blue: var(--r3-red);
+  --accent-red: var(--r3-red);
+  --accent-green: var(--r3-red);
+  --accent-yellow: var(--r3-red);
+  --tint-blue: rgba(138, 31, 31, 0.10);
+  --tint-red: rgba(138, 31, 31, 0.10);
+  --tint-green: rgba(138, 31, 31, 0.10);
+  --tint-yellow: rgba(138, 31, 31, 0.10);
+  --brand-color: var(--r3-red);
+}
+
+:root[data-app-skin="resistance3"] body {
+  background:
+    radial-gradient(140% 90% at 50% 0%, rgba(255, 240, 205, 0.5), transparent 65%),
+    radial-gradient(80% 60% at 15% 100%, rgba(43, 38, 32, 0.18), transparent 70%),
+    linear-gradient(180deg, var(--r3-paper-light) 0%, var(--r3-paper) 65%, var(--r3-paper-dark) 100%);
+  color: var(--r3-ink);
+}
+
+/* Top bar */
+:root[data-app-skin="resistance3"] .menubar {
+  background: rgba(220, 207, 174, 0.85);
+  border-bottom: 1px solid var(--r3-red-dim);
+  color: var(--r3-ink);
+}
+:root[data-app-skin="resistance3"] .brand {
+  color: var(--r3-red);
+  font-family: var(--r3-serif);
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+:root[data-app-skin="resistance3"] .brand-version {
+  color: var(--r3-ink-faint);
+  font-family: var(--r3-serif);
+}
+:root[data-app-skin="resistance3"] .menubar-icon-btn {
+  color: var(--r3-ink-soft);
+  border-radius: 0;
+}
+:root[data-app-skin="resistance3"] .menubar-icon-btn:hover {
+  background: rgba(138, 31, 31, 0.10);
+  color: var(--r3-red);
+}
+:root[data-app-skin="resistance3"] .menubar-icon-btn.active {
+  background: rgba(138, 31, 31, 0.16);
+  color: var(--r3-red-bright);
+}
+
+/* Tab strip */
+:root[data-app-skin="resistance3"] .tab-strip {
+  background: rgba(184, 168, 131, 0.35);
+  border-bottom: 1px solid var(--r3-red-dim);
+}
+:root[data-app-skin="resistance3"] .tab-shell.active {
+  border-bottom-color: var(--r3-red);
+  background: transparent;
+}
+:root[data-app-skin="resistance3"] .tab {
+  color: var(--r3-ink-faint);
+  font-family: var(--r3-serif);
+  letter-spacing: 1px;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+:root[data-app-skin="resistance3"] .tab-shell.active .tab {
+  color: var(--r3-red);
+  font-weight: 700;
+}
+:root[data-app-skin="resistance3"] .tab:hover {
+  color: var(--r3-ink);
+}
+
+/* Tab add menu */
+:root[data-app-skin="resistance3"] .tab-add-menu {
+  background: var(--r3-paper-light);
+  border: 1px solid var(--r3-red-dim);
+  border-radius: 0;
+}
+:root[data-app-skin="resistance3"] .tab-add-menu-item {
+  color: var(--r3-ink);
+  font-family: var(--r3-serif);
+  letter-spacing: 0.5px;
+}
+:root[data-app-skin="resistance3"] .tab-add-menu-item:hover {
+  background: var(--r3-red);
+  color: var(--r3-paper-light);
+}
+
+/* Workspace */
+:root[data-app-skin="resistance3"] .workspace,
+:root[data-app-skin="resistance3"] .workspace-pane {
+  background: transparent;
+}
+
+/* Generic .btn */
+:root[data-app-skin="resistance3"] .btn {
+  background: rgba(232, 222, 192, 0.7);
+  border: 1px solid var(--r3-red-dim);
+  border-radius: 2px;
+  color: var(--r3-ink);
+  font-family: var(--r3-serif);
+  letter-spacing: 0.6px;
+  font-weight: 500;
+  text-transform: none;
+}
+:root[data-app-skin="resistance3"] .btn:hover:not(:disabled) {
+  background: rgba(138, 31, 31, 0.10);
+  border-color: var(--r3-red);
+  color: var(--r3-red);
+}
+:root[data-app-skin="resistance3"] .btn-primary {
+  background: var(--r3-red);
+  border-color: var(--r3-red);
+  color: var(--r3-paper-light);
+}
+:root[data-app-skin="resistance3"] .btn-primary:hover:not(:disabled) {
+  background: var(--r3-red-bright);
+  border-color: var(--r3-red-bright);
+  color: var(--r3-paper-light);
+}
+
+/* List rows / selection — subtle red underline + bold deeper text */
+:root[data-app-skin="resistance3"] [aria-selected="true"],
+:root[data-app-skin="resistance3"] .is-selected,
+:root[data-app-skin="resistance3"] .tree-row.is-selected,
+:root[data-app-skin="resistance3"] li.is-selected {
+  background: transparent;
+  color: var(--r3-red);
+  font-weight: 700;
+  border-radius: 0;
+  box-shadow: inset 0 -1px 0 var(--r3-red);
+}
+
+/* Headings — serif, deep red */
+:root[data-app-skin="resistance3"] h1,
+:root[data-app-skin="resistance3"] h2,
+:root[data-app-skin="resistance3"] h3,
+:root[data-app-skin="resistance3"] h4,
+:root[data-app-skin="resistance3"] .section-title,
+:root[data-app-skin="resistance3"] .settings-heading {
+  color: var(--r3-red);
+  font-family: var(--r3-serif);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-weight: 600;
+}
+
+/* Inputs */
+:root[data-app-skin="resistance3"] input[type="text"],
+:root[data-app-skin="resistance3"] input[type="search"],
+:root[data-app-skin="resistance3"] input[type="number"],
+:root[data-app-skin="resistance3"] select,
+:root[data-app-skin="resistance3"] textarea {
+  background: rgba(232, 222, 192, 0.7);
+  border: 1px solid var(--r3-red-dim);
+  border-radius: 2px;
+  color: var(--r3-ink);
+  font-family: var(--r3-serif);
+}
+:root[data-app-skin="resistance3"] input:focus,
+:root[data-app-skin="resistance3"] select:focus,
+:root[data-app-skin="resistance3"] textarea:focus {
+  outline: none;
+  border-color: var(--r3-red);
+  box-shadow: 0 0 0 2px rgba(138, 31, 31, 0.18);
+}
+
+/* StatusBar */
+:root[data-app-skin="resistance3"] .status-bar,
+:root[data-app-skin="resistance3"] .statusbar {
+  background: rgba(155, 138, 106, 0.4);
+  border-top: 1px solid var(--r3-red-dim);
+  color: var(--r3-ink-soft);
+  font-family: var(--r3-serif);
+}
+
+/* Splitters */
+:root[data-app-skin="resistance3"] [data-panel-resize-handle-id] {
+  background: transparent;
+}
+:root[data-app-skin="resistance3"] [data-panel-resize-handle-id]:hover {
+  background: var(--r3-red-dim);
+}
+
+/* Select component */
+:root[data-app-skin="resistance3"] .select-trigger {
+  background: rgba(232, 222, 192, 0.7);
+  border: 1px solid var(--r3-red-dim);
+  border-radius: 2px;
+  color: var(--r3-ink);
+  font-family: var(--r3-serif);
+  letter-spacing: 0.5px;
+  font-size: 13px;
+  text-transform: none;
+}
+:root[data-app-skin="resistance3"] .select-trigger:hover:not(:disabled) {
+  border-color: var(--r3-red);
+  color: var(--r3-red);
+}
+:root[data-app-skin="resistance3"] .select-trigger-caret {
+  color: var(--r3-red);
+}
+:root[data-app-skin="resistance3"] .select-popover {
+  background: var(--r3-paper-light);
+  border: 1px solid var(--r3-red-dim);
+  border-radius: 0;
+  box-shadow: 0 12px 32px rgba(43, 38, 32, 0.3);
+}
+:root[data-app-skin="resistance3"] .select-option {
+  color: var(--r3-ink);
+  font-family: var(--r3-serif);
+  letter-spacing: 0.5px;
+  border-radius: 0;
+  text-transform: none;
+  font-size: 13px;
+}
+:root[data-app-skin="resistance3"] .select-option:hover:not(.is-disabled) {
+  background: rgba(138, 31, 31, 0.10);
+  color: var(--r3-red);
+}
+:root[data-app-skin="resistance3"] .select-option.is-selected {
+  background: transparent;
+  color: var(--r3-red);
+  font-weight: 700;
+  box-shadow: inset 0 -1px 0 var(--r3-red);
+}
+
+/* SearchField */
+:root[data-app-skin="resistance3"] .search-field {
+  background: rgba(232, 222, 192, 0.7);
+  border: 1px solid var(--r3-red-dim);
+  border-radius: 2px;
+  color: var(--r3-ink);
+}
+:root[data-app-skin="resistance3"] .search-field:hover,
+:root[data-app-skin="resistance3"] .search-field.is-focused {
+  border-color: var(--r3-red);
+  background: var(--r3-paper-light);
+}
+:root[data-app-skin="resistance3"] .search-field-icon {
+  color: var(--r3-red);
+}
+:root[data-app-skin="resistance3"] .search-field-input {
+  color: var(--r3-ink);
+  font-family: var(--r3-serif);
+  letter-spacing: 0.4px;
+  font-size: 13px;
+}
+:root[data-app-skin="resistance3"] .search-field-input::placeholder {
+  color: var(--r3-ink-faint);
+  font-style: italic;
+}
+:root[data-app-skin="resistance3"] .search-field-clear {
+  color: var(--r3-red);
+  border-radius: 0;
+}
+
+/* Progress bars — thin red ink fill on paper */
+:root[data-app-skin="resistance3"] .cache-progress-bar,
+:root[data-app-skin="resistance3"] .load-progress-bar {
+  height: 10px;
+  background: rgba(155, 138, 106, 0.3);
+  border: 1px solid var(--r3-red-dim);
+  border-radius: 0;
+  padding: 1px;
+  box-shadow: none;
+  overflow: visible;
+}
+:root[data-app-skin="resistance3"] .cache-progress-bar-fill,
+:root[data-app-skin="resistance3"] .load-progress-fill {
+  position: relative;
+  inset: auto;
+  height: 100%;
+  background: var(--r3-red);
+  border-radius: 0;
+  box-shadow: none;
+  transition: width 220ms ease-out;
+}
+
+/* Modal — journal variant: paper card with deep-red title underline */
+.modal-dialog--journal {
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(255, 240, 205, 0.6), transparent 70%),
+    linear-gradient(180deg, var(--r3-paper-light, #e8dec0) 0%, var(--r3-paper, #dccfae) 100%);
+  border: 1px solid var(--r3-paper-edge, #9b8a6a);
+  border-radius: 2px;
+  color: var(--r3-ink, #2b2620);
+  font-family: var(--r3-serif, "Crimson Text", Georgia, serif);
+  box-shadow:
+    0 24px 60px rgba(43, 38, 32, 0.45),
+    inset 0 0 60px rgba(43, 38, 32, 0.06);
+}
+.modal-dialog--journal .modal-header {
+  padding: 20px 28px 12px;
+  border-bottom: 2px solid var(--r3-red, #8a1f1f);
+  background: transparent;
+}
+.modal-dialog--journal .modal-title {
+  color: var(--r3-red, #8a1f1f);
+  font-family: var(--r3-serif, Georgia, serif);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.modal-dialog--journal .modal-subtitle {
+  color: var(--r3-ink-soft, #5a4f42);
+  font-family: var(--r3-serif, Georgia, serif);
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  font-style: italic;
+  margin-top: 6px;
+  text-transform: none;
+}
+.modal-dialog--journal .modal-close {
+  color: var(--r3-red, #8a1f1f);
+  border-radius: 0;
+  border: 1px solid transparent;
+}
+.modal-dialog--journal .modal-close:hover {
+  background: rgba(138, 31, 31, 0.10);
+  border-color: var(--r3-red, #8a1f1f);
+}
+.modal-dialog--journal .modal-body {
+  color: var(--r3-ink, #2b2620);
+  font-family: var(--r3-serif, Georgia, serif);
+  font-size: 14px;
+  letter-spacing: 0.2px;
+  padding: 20px 28px;
+}
+.modal-dialog--journal .modal-subheader {
+  border-bottom: 1px solid var(--r3-rule, rgba(43, 38, 32, 0.22));
+  background: rgba(155, 138, 106, 0.15);
+  padding: 12px 28px;
+}
+.modal-dialog--journal .modal-footer {
+  border-top: 1px solid var(--r3-rule, rgba(43, 38, 32, 0.22));
+  background: transparent;
+  padding: 14px 28px 18px;
+}
+.modal-dialog--journal .modal-body > * + * {
+  margin-top: 14px;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+   Resistance: Fall of Man skin — industrial military aesthetic.
+   Dark olive panels behind a rusted metal frame, cream-yellow text,
+   subtle CRT scanlines on inset surfaces, active items get a brighter
+   cream highlight with a thin yellow rule.
+   ─────────────────────────────────────────────────────────────────── */
+
+:root[data-app-skin="resistance1"] {
+  /* Army-drab olive-green base with rust patina — matches the
+     in-game create-game / multiplayer menu chassis (NOT brown). */
+  --rfom-bg: #383a20;
+  --rfom-bg-deep: #1f2010;
+  --rfom-panel: #2a2e18;
+  --rfom-panel-light: #3a4022;
+  --rfom-panel-dark: #18190d;
+  --rfom-metal: #5a6030;
+  --rfom-metal-dark: #383a20;
+  --rfom-rust: #7a5a30;
+  --rfom-rust-dark: #4a3a1d;
+  --rfom-ink: #b8b070;
+  --rfom-ink-bright: #d8c870;
+  --rfom-ink-dim: #807840;
+  --rfom-ink-faint: #5a532a;
+  --rfom-glow: #c8a838;
+  --rfom-rule: rgba(184, 176, 112, 0.22);
+  --rfom-stencil: "Oswald", "Roboto Condensed", "Bebas Neue", "Special Elite",
+    system-ui, sans-serif;
+
+  --bg-app: var(--rfom-bg);
+  --surface-100: var(--rfom-panel);
+  --surface-200: var(--rfom-panel-light);
+  --surface-300: var(--rfom-metal-dark);
+  --hairline: var(--rfom-rule);
+  --text-1: var(--rfom-ink-bright);
+  --text-2: var(--rfom-ink);
+  --text-3: var(--rfom-ink-dim);
+  --accent-blue: var(--rfom-glow);
+  --accent-red: var(--rfom-glow);
+  --accent-green: var(--rfom-glow);
+  --accent-yellow: var(--rfom-glow);
+  --tint-blue: rgba(212, 176, 72, 0.10);
+  --tint-red: rgba(212, 176, 72, 0.10);
+  --tint-green: rgba(212, 176, 72, 0.10);
+  --tint-yellow: rgba(212, 176, 72, 0.10);
+  --brand-color: var(--rfom-glow);
+}
+
+/* Army-drab olive panel body with rust patina spots in the corners
+   plus subtle CRT scanlines — matches the in-game multiplayer menu. */
+:root[data-app-skin="resistance1"] body {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.10) 0px,
+      rgba(0, 0, 0, 0.10) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    radial-gradient(45% 35% at 8% 95%, rgba(120, 70, 30, 0.32), transparent 70%),
+    radial-gradient(40% 30% at 92% 8%, rgba(140, 80, 35, 0.28), transparent 70%),
+    radial-gradient(35% 25% at 100% 100%, rgba(100, 55, 25, 0.30), transparent 70%),
+    radial-gradient(50% 30% at 50% 100%, rgba(0, 0, 0, 0.40), transparent 75%),
+    linear-gradient(170deg, #4a4d28 0%, #3a3c20 35%, #2a2c18 70%, #1c1d0e 100%);
+  color: var(--rfom-ink);
+}
+
+/* Top bar — recessed metal strip */
+:root[data-app-skin="resistance1"] .menubar {
+  background: linear-gradient(180deg, var(--rfom-metal-dark) 0%, var(--rfom-bg) 100%);
+  border-bottom: 1px solid var(--rfom-rust);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+}
+:root[data-app-skin="resistance1"] .brand {
+  color: var(--rfom-ink-bright);
+  font-family: var(--rfom-stencil);
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+:root[data-app-skin="resistance1"] .brand-version {
+  color: var(--rfom-ink-dim);
+  font-family: var(--rfom-stencil);
+  letter-spacing: 1px;
+}
+:root[data-app-skin="resistance1"] .menubar-icon-btn {
+  color: var(--rfom-ink-dim);
+  border-radius: 0;
+}
+:root[data-app-skin="resistance1"] .menubar-icon-btn:hover {
+  background: rgba(232, 184, 48, 0.12);
+  color: var(--rfom-ink-bright);
+}
+:root[data-app-skin="resistance1"] .menubar-icon-btn.active {
+  background: rgba(232, 184, 48, 0.18);
+  color: var(--rfom-ink-bright);
+}
+
+/* Tab strip */
+:root[data-app-skin="resistance1"] .tab-strip {
+  background: var(--rfom-panel-dark);
+  border-bottom: 1px solid var(--rfom-rust);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+}
+:root[data-app-skin="resistance1"] .tab-shell.active {
+  border-bottom-color: var(--rfom-glow);
+  background: rgba(232, 184, 48, 0.06);
+}
+:root[data-app-skin="resistance1"] .tab {
+  color: var(--rfom-ink-dim);
+  font-family: var(--rfom-stencil);
+  letter-spacing: 1.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+:root[data-app-skin="resistance1"] .tab-shell.active .tab {
+  color: var(--rfom-ink-bright);
+}
+:root[data-app-skin="resistance1"] .tab:hover {
+  color: var(--rfom-ink);
+}
+
+/* Tab add menu */
+:root[data-app-skin="resistance1"] .tab-add-menu {
+  background: var(--rfom-panel);
+  border: 1px solid var(--rfom-rust);
+  border-radius: 0;
+}
+:root[data-app-skin="resistance1"] .tab-add-menu-item {
+  color: var(--rfom-ink);
+  font-family: var(--rfom-stencil);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+:root[data-app-skin="resistance1"] .tab-add-menu-item:hover {
+  background: rgba(232, 184, 48, 0.16);
+  color: var(--rfom-ink-bright);
+}
+
+/* Workspace */
+:root[data-app-skin="resistance1"] .workspace,
+:root[data-app-skin="resistance1"] .workspace-pane {
+  background: transparent;
+}
+
+/* Generic .btn — metallic plate look */
+/* Olive-drab cloth buttons — army fatigue feel, not chromed metal */
+:root[data-app-skin="resistance1"] .btn {
+  background: linear-gradient(180deg, #3a3f22 0%, #1f2110 100%);
+  border: 1px solid var(--rfom-rust-dark);
+  border-radius: 4px;
+  color: var(--rfom-ink);
+  font-family: var(--rfom-stencil);
+  letter-spacing: 1.2px;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 12px;
+  box-shadow:
+    inset 0 1px 0 rgba(184, 176, 112, 0.10),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.40);
+}
+:root[data-app-skin="resistance1"] .btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #4a5028 0%, #2a2e18 100%);
+  border-color: var(--rfom-rust);
+  color: var(--rfom-ink-bright);
+}
+:root[data-app-skin="resistance1"] .btn-primary {
+  background: linear-gradient(180deg, #a89028 0%, #6e5a18 100%);
+  border-color: #6e5a18;
+  color: #18190a;
+}
+:root[data-app-skin="resistance1"] .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #c8a838 0%, #8a7022 100%);
+  border-color: #8a7022;
+  color: #18190a;
+}
+
+/* List rows / selection — single muted yellow underline, no gradient */
+:root[data-app-skin="resistance1"] [aria-selected="true"],
+:root[data-app-skin="resistance1"] .is-selected,
+:root[data-app-skin="resistance1"] .tree-row.is-selected,
+:root[data-app-skin="resistance1"] li.is-selected {
+  background: rgba(212, 176, 72, 0.10);
+  color: var(--rfom-ink-bright);
+  border-radius: 0;
+  box-shadow: inset 0 -1px 0 var(--rfom-glow);
+}
+
+/* Headings */
+:root[data-app-skin="resistance1"] h1,
+:root[data-app-skin="resistance1"] h2,
+:root[data-app-skin="resistance1"] h3,
+:root[data-app-skin="resistance1"] h4,
+:root[data-app-skin="resistance1"] .section-title,
+:root[data-app-skin="resistance1"] .settings-heading {
+  color: var(--rfom-ink-bright);
+  font-family: var(--rfom-stencil);
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  font-weight: 600;
+}
+
+/* Inputs — recessed dark panels */
+:root[data-app-skin="resistance1"] input[type="text"],
+:root[data-app-skin="resistance1"] input[type="search"],
+:root[data-app-skin="resistance1"] input[type="number"],
+:root[data-app-skin="resistance1"] select,
+:root[data-app-skin="resistance1"] textarea {
+  background: var(--rfom-panel-dark);
+  border: 1px solid var(--rfom-rust);
+  border-radius: 2px;
+  color: var(--rfom-ink-bright);
+  font-family: var(--rfom-stencil);
+  letter-spacing: 0.5px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+:root[data-app-skin="resistance1"] input:focus,
+:root[data-app-skin="resistance1"] select:focus,
+:root[data-app-skin="resistance1"] textarea:focus {
+  outline: none;
+  border-color: var(--rfom-glow);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(232, 184, 48, 0.25);
+}
+
+/* StatusBar */
+:root[data-app-skin="resistance1"] .status-bar,
+:root[data-app-skin="resistance1"] .statusbar {
+  background: var(--rfom-metal-dark);
+  border-top: 1px solid var(--rfom-rust);
+  color: var(--rfom-ink-dim);
+  font-family: var(--rfom-stencil);
+  letter-spacing: 1px;
+}
+
+/* Splitters */
+:root[data-app-skin="resistance1"] [data-panel-resize-handle-id] {
+  background: transparent;
+}
+:root[data-app-skin="resistance1"] [data-panel-resize-handle-id]:hover {
+  background: var(--rfom-rust);
+}
+
+/* Select component */
+:root[data-app-skin="resistance1"] .select-trigger {
+  background: linear-gradient(180deg, var(--rfom-panel-light) 0%, var(--rfom-panel) 100%);
+  border: 1px solid var(--rfom-rust);
+  border-radius: 2px;
+  color: var(--rfom-ink);
+  font-family: var(--rfom-stencil);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+:root[data-app-skin="resistance1"] .select-trigger:hover:not(:disabled) {
+  border-color: var(--rfom-glow);
+  color: var(--rfom-ink-bright);
+}
+:root[data-app-skin="resistance1"] .select-trigger-caret {
+  color: var(--rfom-glow);
+}
+:root[data-app-skin="resistance1"] .select-popover {
+  background: var(--rfom-panel);
+  border: 1px solid var(--rfom-rust);
+  border-radius: 0;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+:root[data-app-skin="resistance1"] .select-option {
+  color: var(--rfom-ink);
+  font-family: var(--rfom-stencil);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-size: 12px;
+}
+:root[data-app-skin="resistance1"] .select-option:hover:not(.is-disabled) {
+  background: rgba(232, 184, 48, 0.12);
+  color: var(--rfom-ink-bright);
+}
+:root[data-app-skin="resistance1"] .select-option.is-selected {
+  background: rgba(232, 184, 48, 0.18);
+  color: var(--rfom-ink-bright);
+  box-shadow: inset 0 0 0 1px rgba(232, 184, 48, 0.35);
+}
+
+/* SearchField */
+:root[data-app-skin="resistance1"] .search-field {
+  background: var(--rfom-panel-dark);
+  border: 1px solid var(--rfom-rust);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+:root[data-app-skin="resistance1"] .search-field:hover,
+:root[data-app-skin="resistance1"] .search-field.is-focused {
+  border-color: var(--rfom-glow);
+}
+:root[data-app-skin="resistance1"] .search-field-icon {
+  color: var(--rfom-glow);
+}
+:root[data-app-skin="resistance1"] .search-field-input {
+  color: var(--rfom-ink-bright);
+  font-family: var(--rfom-stencil);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+:root[data-app-skin="resistance1"] .search-field-input::placeholder {
+  color: var(--rfom-ink-dim);
+}
+
+/* Progress bars — recessed dark groove with cream-yellow fill */
+:root[data-app-skin="resistance1"] .cache-progress-bar,
+:root[data-app-skin="resistance1"] .load-progress-bar {
+  height: 12px;
+  background: var(--rfom-panel-dark);
+  border: 1px solid var(--rfom-rust);
+  border-radius: 2px;
+  padding: 1px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  overflow: visible;
+}
+:root[data-app-skin="resistance1"] .cache-progress-bar-fill,
+:root[data-app-skin="resistance1"] .load-progress-fill {
+  position: relative;
+  inset: auto;
+  height: 100%;
+  background: linear-gradient(180deg, var(--rfom-ink-bright) 0%, var(--rfom-glow) 100%);
+  border-radius: 0;
+  box-shadow: 0 0 6px rgba(232, 184, 48, 0.35);
+  transition: width 220ms ease-out;
+}
+
+/* Modal — metal-frame variant: olive-drab plate with rust patina,
+   recessed inner panel + screw decorations at the four corners. */
+.modal-dialog--metal {
+  background:
+    radial-gradient(circle at 16px 16px, #181a0c 4px, transparent 6px),
+    radial-gradient(circle at calc(100% - 16px) 16px, #181a0c 4px, transparent 6px),
+    radial-gradient(circle at 16px calc(100% - 16px), #181a0c 4px, transparent 6px),
+    radial-gradient(circle at calc(100% - 16px) calc(100% - 16px), #181a0c 4px, transparent 6px),
+    radial-gradient(60% 50% at 100% 0%, rgba(120, 70, 30, 0.20), transparent 75%),
+    radial-gradient(60% 50% at 0% 100%, rgba(120, 70, 30, 0.18), transparent 75%),
+    linear-gradient(180deg, #4d5028 0%, #383a20 100%);
+  border: 1px solid #181a0c;
+  border-radius: 4px;
+  color: var(--rfom-ink, #b8b070);
+  font-family: var(--rfom-stencil, system-ui);
+  padding: 14px;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(184, 176, 112, 0.10);
+}
+/* Inner recessed panel — wraps header/body/footer with the dark olive
+   scanline texture (matches the in-game CRT panel). */
+.modal-dialog--metal .modal-header,
+.modal-dialog--metal .modal-body,
+.modal-dialog--metal .modal-subheader,
+.modal-dialog--metal .modal-footer {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.18) 0px,
+      rgba(0, 0, 0, 0.18) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    var(--rfom-panel, #2a2e18);
+}
+.modal-dialog--metal .modal-header {
+  padding: 18px 24px 12px;
+  border-bottom: 1px solid var(--rfom-rust, #5a4a2a);
+}
+.modal-dialog--metal .modal-title {
+  color: var(--rfom-ink-bright, #f0e090);
+  font-family: var(--rfom-stencil, system-ui);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+.modal-dialog--metal .modal-subtitle {
+  color: var(--rfom-ink-dim, #8a7e4a);
+  font-family: var(--rfom-stencil, system-ui);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+.modal-dialog--metal .modal-close {
+  color: var(--rfom-ink, #d4c280);
+  border-radius: 0;
+  border: 1px solid transparent;
+}
+.modal-dialog--metal .modal-close:hover {
+  background: rgba(232, 184, 48, 0.12);
+  border-color: var(--rfom-rust, #5a4a2a);
+  color: var(--rfom-ink-bright, #f0e090);
+}
+.modal-dialog--metal .modal-body {
+  color: var(--rfom-ink, #d4c280);
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  padding: 20px 24px;
+}
+.modal-dialog--metal .modal-subheader {
+  border-bottom: 1px solid var(--rfom-rust, #5a4a2a);
+  padding: 12px 24px;
+}
+.modal-dialog--metal .modal-footer {
+  border-top: 1px solid var(--rfom-rust, #5a4a2a);
+  padding: 14px 24px 18px;
+}
+.modal-dialog--metal .modal-body > * + * {
+  margin-top: 14px;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+   R&C: A Crack in Time skin — cosmic navy with warm orange highlights.
+   Dark navy background, rounded panels with light-edge highlights,
+   bold orange active states with arrow indicators, clean sci-fi feel.
+   ─────────────────────────────────────────────────────────────────── */
+
+:root[data-app-skin="racit"] {
+  --acit-bg: #0a1428;
+  --acit-bg-deep: #050b18;
+  --acit-panel: #1a2540;
+  --acit-panel-light: #243353;
+  --acit-panel-edge: rgba(150, 180, 220, 0.18);
+  --acit-text: #f0f4ff;
+  --acit-text-dim: #8a96b0;
+  --acit-orange: #f0a830;
+  --acit-orange-bright: #ffc450;
+  --acit-orange-dim: rgba(240, 168, 48, 0.32);
+  --acit-rule: rgba(150, 180, 220, 0.18);
+  --acit-glow: rgba(240, 168, 48, 0.5);
+  --acit-sans: "Inter", "Eurostile", "Roboto", system-ui, sans-serif;
+
+  --bg-app: var(--acit-bg);
+  --surface-100: var(--acit-panel);
+  --surface-200: var(--acit-panel-light);
+  --surface-300: var(--acit-bg-deep);
+  --hairline: var(--acit-rule);
+  --text-1: var(--acit-text);
+  --text-2: #c8d0e0;
+  --text-3: var(--acit-text-dim);
+  --accent-blue: var(--acit-orange);
+  --accent-red: var(--acit-orange);
+  --accent-green: var(--acit-orange);
+  --accent-yellow: var(--acit-orange);
+  --tint-blue: rgba(240, 168, 48, 0.12);
+  --tint-red: rgba(240, 168, 48, 0.12);
+  --tint-green: rgba(240, 168, 48, 0.12);
+  --tint-yellow: rgba(240, 168, 48, 0.12);
+  --brand-color: var(--acit-orange);
+}
+
+:root[data-app-skin="racit"] body {
+  background:
+    radial-gradient(80% 50% at 20% 30%, rgba(60, 100, 180, 0.12), transparent 65%),
+    radial-gradient(80% 50% at 80% 70%, rgba(120, 80, 200, 0.10), transparent 65%),
+    radial-gradient(40% 30% at 50% 50%, rgba(240, 168, 48, 0.04), transparent 75%),
+    linear-gradient(180deg, #0c1628 0%, #050911 100%);
+  color: var(--acit-text);
+}
+
+/* Top bar */
+:root[data-app-skin="racit"] .menubar {
+  background: linear-gradient(180deg, rgba(36, 51, 83, 0.85) 0%, rgba(10, 20, 40, 0.85) 100%);
+  border-bottom: 1px solid var(--acit-orange-dim);
+  box-shadow: inset 0 1px 0 rgba(150, 180, 220, 0.10);
+}
+:root[data-app-skin="racit"] .brand {
+  color: var(--acit-orange-bright);
+  font-family: var(--acit-sans);
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+:root[data-app-skin="racit"] .brand-version {
+  color: var(--acit-text-dim);
+}
+:root[data-app-skin="racit"] .menubar-icon-btn {
+  color: var(--acit-text-dim);
+  border-radius: 6px;
+}
+:root[data-app-skin="racit"] .menubar-icon-btn:hover {
+  background: rgba(240, 168, 48, 0.12);
+  color: var(--acit-orange-bright);
+}
+:root[data-app-skin="racit"] .menubar-icon-btn.active {
+  background: rgba(240, 168, 48, 0.18);
+  color: var(--acit-orange-bright);
+  box-shadow: 0 0 12px rgba(240, 168, 48, 0.25);
+}
+
+/* Tab strip */
+:root[data-app-skin="racit"] .tab-strip {
+  background: rgba(10, 20, 40, 0.6);
+  border-bottom: 1px solid var(--acit-orange-dim);
+}
+:root[data-app-skin="racit"] .tab-shell.active {
+  border-bottom-color: var(--acit-orange);
+  background: rgba(240, 168, 48, 0.06);
+}
+:root[data-app-skin="racit"] .tab {
+  color: var(--acit-text-dim);
+  font-family: var(--acit-sans);
+  letter-spacing: 1.2px;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+:root[data-app-skin="racit"] .tab-shell.active .tab {
+  color: var(--acit-orange-bright);
+}
+:root[data-app-skin="racit"] .tab:hover {
+  color: var(--acit-text);
+}
+
+/* Tab add menu */
+:root[data-app-skin="racit"] .tab-add-menu {
+  background: var(--acit-panel);
+  border: 1px solid var(--acit-orange-dim);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+:root[data-app-skin="racit"] .tab-add-menu-item {
+  color: var(--acit-text);
+  font-family: var(--acit-sans);
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+}
+:root[data-app-skin="racit"] .tab-add-menu-item:hover {
+  background: rgba(240, 168, 48, 0.16);
+  color: var(--acit-orange-bright);
+}
+
+/* Workspace */
+:root[data-app-skin="racit"] .workspace,
+:root[data-app-skin="racit"] .workspace-pane {
+  background: transparent;
+}
+
+/* Generic .btn — rounded glossy pill */
+:root[data-app-skin="racit"] .btn {
+  background: linear-gradient(180deg, var(--acit-panel-light) 0%, var(--acit-panel) 100%);
+  border: 1px solid var(--acit-panel-edge);
+  border-radius: 8px;
+  color: var(--acit-text);
+  font-family: var(--acit-sans);
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+:root[data-app-skin="racit"] .btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #2e3f60 0%, var(--acit-panel-light) 100%);
+  border-color: var(--acit-orange);
+  color: var(--acit-orange-bright);
+}
+:root[data-app-skin="racit"] .btn-primary {
+  background: linear-gradient(180deg, var(--acit-orange-bright) 0%, var(--acit-orange) 100%);
+  border-color: var(--acit-orange-bright);
+  color: #1a1408;
+  box-shadow: 0 0 12px rgba(240, 168, 48, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+:root[data-app-skin="racit"] .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ffd070 0%, var(--acit-orange-bright) 100%);
+  color: #1a1408;
+}
+
+/* List rows / selection — orange highlight bar with bold text */
+:root[data-app-skin="racit"] [aria-selected="true"],
+:root[data-app-skin="racit"] .is-selected,
+:root[data-app-skin="racit"] .tree-row.is-selected,
+:root[data-app-skin="racit"] li.is-selected {
+  background: linear-gradient(90deg, rgba(240, 168, 48, 0.22) 0%, rgba(240, 168, 48, 0.06) 100%);
+  color: var(--acit-orange-bright);
+  font-weight: 700;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--acit-orange-dim);
+}
+
+/* Headings */
+:root[data-app-skin="racit"] h1,
+:root[data-app-skin="racit"] h2,
+:root[data-app-skin="racit"] h3,
+:root[data-app-skin="racit"] h4,
+:root[data-app-skin="racit"] .section-title,
+:root[data-app-skin="racit"] .settings-heading {
+  color: var(--acit-orange-bright);
+  font-family: var(--acit-sans);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-weight: 700;
+}
+
+/* Inputs */
+:root[data-app-skin="racit"] input[type="text"],
+:root[data-app-skin="racit"] input[type="search"],
+:root[data-app-skin="racit"] input[type="number"],
+:root[data-app-skin="racit"] select,
+:root[data-app-skin="racit"] textarea {
+  background: var(--acit-bg-deep);
+  border: 1px solid var(--acit-panel-edge);
+  border-radius: 6px;
+  color: var(--acit-text);
+  font-family: var(--acit-sans);
+}
+:root[data-app-skin="racit"] input:focus,
+:root[data-app-skin="racit"] select:focus,
+:root[data-app-skin="racit"] textarea:focus {
+  outline: none;
+  border-color: var(--acit-orange);
+  box-shadow: 0 0 0 2px rgba(240, 168, 48, 0.18);
+}
+
+/* StatusBar */
+:root[data-app-skin="racit"] .status-bar,
+:root[data-app-skin="racit"] .statusbar {
+  background: linear-gradient(180deg, rgba(36, 51, 83, 0.7) 0%, rgba(10, 20, 40, 0.85) 100%);
+  border-top: 1px solid var(--acit-orange-dim);
+  color: var(--acit-text-dim);
+  font-family: var(--acit-sans);
+}
+
+/* Splitters */
+:root[data-app-skin="racit"] [data-panel-resize-handle-id] {
+  background: transparent;
+}
+:root[data-app-skin="racit"] [data-panel-resize-handle-id]:hover {
+  background: var(--acit-orange-dim);
+}
+
+/* Select component */
+:root[data-app-skin="racit"] .select-trigger {
+  background: linear-gradient(180deg, var(--acit-panel-light) 0%, var(--acit-panel) 100%);
+  border: 1px solid var(--acit-panel-edge);
+  border-radius: 8px;
+  color: var(--acit-text);
+  font-family: var(--acit-sans);
+  letter-spacing: 0.5px;
+  font-size: 13px;
+}
+:root[data-app-skin="racit"] .select-trigger:hover:not(:disabled) {
+  border-color: var(--acit-orange);
+  color: var(--acit-orange-bright);
+}
+:root[data-app-skin="racit"] .select-trigger-caret {
+  color: var(--acit-orange);
+}
+:root[data-app-skin="racit"] .select-popover {
+  background: var(--acit-panel);
+  border: 1px solid var(--acit-orange-dim);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+}
+:root[data-app-skin="racit"] .select-option {
+  color: var(--acit-text);
+  font-family: var(--acit-sans);
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+:root[data-app-skin="racit"] .select-option:hover:not(.is-disabled) {
+  background: rgba(240, 168, 48, 0.14);
+  color: var(--acit-orange-bright);
+}
+:root[data-app-skin="racit"] .select-option.is-selected {
+  background: linear-gradient(90deg, rgba(240, 168, 48, 0.22) 0%, rgba(240, 168, 48, 0.06) 100%);
+  color: var(--acit-orange-bright);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--acit-orange-dim);
+}
+
+/* SearchField */
+:root[data-app-skin="racit"] .search-field {
+  background: var(--acit-bg-deep);
+  border: 1px solid var(--acit-panel-edge);
+  border-radius: 8px;
+}
+:root[data-app-skin="racit"] .search-field:hover,
+:root[data-app-skin="racit"] .search-field.is-focused {
+  border-color: var(--acit-orange);
+  box-shadow: 0 0 0 2px rgba(240, 168, 48, 0.15);
+}
+:root[data-app-skin="racit"] .search-field-icon {
+  color: var(--acit-orange);
+}
+:root[data-app-skin="racit"] .search-field-input {
+  color: var(--acit-text);
+  font-family: var(--acit-sans);
+  letter-spacing: 0.4px;
+}
+:root[data-app-skin="racit"] .search-field-input::placeholder {
+  color: var(--acit-text-dim);
+}
+:root[data-app-skin="racit"] .search-field-clear {
+  color: var(--acit-orange);
+  border-radius: 4px;
+}
+
+/* Progress bars — rounded with glossy orange fill + glow */
+:root[data-app-skin="racit"] .cache-progress-bar,
+:root[data-app-skin="racit"] .load-progress-bar {
+  height: 10px;
+  background: var(--acit-bg-deep);
+  border: 1px solid var(--acit-panel-edge);
+  border-radius: 999px;
+  padding: 2px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  overflow: visible;
+}
+:root[data-app-skin="racit"] .cache-progress-bar-fill,
+:root[data-app-skin="racit"] .load-progress-fill {
+  position: relative;
+  inset: auto;
+  height: 100%;
+  background: linear-gradient(180deg, var(--acit-orange-bright) 0%, var(--acit-orange) 100%);
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(240, 168, 48, 0.5);
+  transition: width 220ms ease-out;
+}
+
+/* Modal — cosmic variant: navy panel with light edges + orange title */
+.modal-dialog--cosmic {
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(60, 100, 180, 0.12), transparent 60%),
+    linear-gradient(180deg, var(--acit-panel, #1a2540) 0%, var(--acit-bg, #0a1428) 100%);
+  border: 1px solid var(--acit-orange-dim, rgba(240, 168, 48, 0.32));
+  border-radius: 12px;
+  color: var(--acit-text, #f0f4ff);
+  font-family: var(--acit-sans, system-ui);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(150, 180, 220, 0.15),
+    0 0 32px rgba(240, 168, 48, 0.10);
+}
+.modal-dialog--cosmic .modal-header {
+  padding: 18px 24px 12px;
+  border-bottom: 1px solid var(--acit-orange-dim, rgba(240, 168, 48, 0.32));
+  background: transparent;
+}
+.modal-dialog--cosmic .modal-title {
+  color: var(--acit-orange-bright, #ffc450);
+  font-family: var(--acit-sans, system-ui);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.modal-dialog--cosmic .modal-subtitle {
+  color: var(--acit-text-dim, #8a96b0);
+  font-family: var(--acit-sans, system-ui);
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  margin-top: 6px;
+}
+.modal-dialog--cosmic .modal-close {
+  color: var(--acit-orange, #f0a830);
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.modal-dialog--cosmic .modal-close:hover {
+  background: rgba(240, 168, 48, 0.12);
+  border-color: var(--acit-orange, #f0a830);
+  color: var(--acit-orange-bright, #ffc450);
+}
+.modal-dialog--cosmic .modal-body {
+  color: var(--acit-text, #f0f4ff);
+  font-family: var(--acit-sans, system-ui);
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  padding: 20px 24px;
+}
+.modal-dialog--cosmic .modal-subheader {
+  border-bottom: 1px solid rgba(150, 180, 220, 0.15);
+  background: rgba(36, 51, 83, 0.3);
+  padding: 12px 24px;
+}
+.modal-dialog--cosmic .modal-footer {
+  border-top: 1px solid rgba(150, 180, 220, 0.15);
+  background: transparent;
+  padding: 14px 24px 18px;
+}
+.modal-dialog--cosmic .modal-body > * + * {
+  margin-top: 14px;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+   FallbackImage placeholder — shown when every per-level candidate
+   fails. The inner <img> gets the franchise placeholder URL; an
+   overlay span sits on top with a "no image" label.
+   ─────────────────────────────────────────────────────────────────── */
+
+.fallback-image.is-placeholder {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.35);
+}
+.fallback-image.is-placeholder > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.55) saturate(0.7);
+}
+.fallback-image-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.10) 0%, rgba(0, 0, 0, 0.55) 100%);
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  padding: 6px 8px;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+/* Tiny thumbs (recents list) — shrink the overlay label so it stays
+   readable inside ~56×32 px. */
+.open-level-recent-thumb.fallback-image .fallback-image-overlay {
+  font-size: 8px;
+  letter-spacing: 1px;
+  padding: 2px 4px;
 }

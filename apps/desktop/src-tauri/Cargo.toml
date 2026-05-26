@@ -45,3 +45,5 @@ base64 = "0.22"
 dotenvy = "0.15"
 lunalib = { path = "../../../crates/lunalib" }
 psarc = { path = "../../../crates/psarc" }
+image = { version = "0.25", default-features = false, features = ["png", "tga", "jpeg", "dds"] }
+zip = { version = "0.6", default-features = false }

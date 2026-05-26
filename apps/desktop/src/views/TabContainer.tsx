@@ -64,6 +64,7 @@ export function TabContainer({ panelId, views, className }: TabContainerProps) {
     return ALL_VIEW_IDS.filter((vid) => {
       if (layout.tabs.includes(vid)) return false;
       const meta = VIEW_META[vid];
+      if (!meta) return false;
       if (meta.singleton) {
         for (const id of Object.keys(allPanels) as PanelId[]) {
           if (id === panelId) continue;
@@ -142,6 +143,7 @@ export function TabContainer({ panelId, views, className }: TabContainerProps) {
       <div className="tab-strip" role="tablist">
         {layout.tabs.map((tabId, i) => {
           const meta = VIEW_META[tabId];
+          if (!meta) return null;
           const label = meta.i18nKey ? t(meta.i18nKey) : meta.label;
           const isActive = tabId === activeId;
           return (
@@ -222,6 +224,7 @@ export function TabContainer({ panelId, views, className }: TabContainerProps) {
             <div className="tab-add-menu" role="menu">
               {availableViews.map((vid) => {
                 const meta = VIEW_META[vid];
+                if (!meta) return null;
                 const label = meta.i18nKey ? t(meta.i18nKey) : meta.label;
                 return (
                   <button

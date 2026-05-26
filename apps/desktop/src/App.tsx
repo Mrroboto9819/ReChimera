@@ -65,6 +65,7 @@ import { PsarcModal } from "./components/PsarcModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { TabContainer } from "./views/TabContainer";
 import { useApplySettings } from "./useApplySettings";
+import { useGlobalUiSounds } from "./useUiSound";
 import type { ViewId } from "./store";
 import { SoundPlayer, type NowPlaying } from "./components/SoundPlayer";
 import { Splash } from "./views/Splash";
@@ -105,6 +106,7 @@ export function App() {
   const layout = useAppSelector((s) => s.layout);
 
   useApplySettings();
+  useGlobalUiSounds();
 
   const leftPanelTabs = useAppSelector(
     (s) => s.panels.panels.left.tabs.length,
