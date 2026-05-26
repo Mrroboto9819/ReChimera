@@ -11,6 +11,7 @@ import {
   extractLevelToCache,
   r2CacheNeedsRebuild,
   r2ExtractGlobals,
+  r2ExtractRootPsarcs,
   r2ExtractLevel,
   r2ImportThumbnail,
   r2LevelOpenPath,
@@ -30,7 +31,7 @@ import type {
   R2SetupStatus,
 } from "../api";
 
-type Phase = "usrdir" | "globals" | "maps" | "level" | "prepare";
+type Phase = "usrdir" | "root_extract" | "globals" | "maps" | "level" | "prepare";
 
 interface R2WizardProps {
   open: boolean;
@@ -44,6 +45,10 @@ interface R2WizardProps {
   /** Short label shown in the wizard's title breadcrumb
    *  (e.g. "R2", "R3", "ACiT", "A4O"). Defaults to "R2". */
   gameLabel?: string;
+  /** Per-game ready-marker filename written into `built/levels/<map>/`
+   *  after PSARC extraction. V2 games use `assetlookup.dat`; RFOM uses
+   *  `ps3levelmain.dat`. Defaults to `assetlookup.dat`. */
+  entryFile?: string;
 }
 
 const USRDIR_KEY_PREFIX = "rechimera.usrdir.last";
@@ -80,6 +85,10 @@ interface ExtractState {
   lastFile: string;
   psarc: string;
   skipped: string[];
+  /** PSARCs that completed successfully (fresh extract OR skipped-because-
+   *  already-extracted both count). Used to detect "everything failed"
+   *  vs "all good" after the `Done` event arrives. */
+  succeeded: string[];
   warnings: string[];
 }
 
@@ -89,6 +98,7 @@ const EMPTY_EXTRACT: ExtractState = {
   lastFile: "",
   psarc: "",
   skipped: [],
+  succeeded: [],
   warnings: [],
 };
 
@@ -256,6 +266,7 @@ export function R2Wizard({
   onOpen,
   gameId = "r2",
   gameLabel = "R2",
+  entryFile = "assetlookup.dat",
 }: R2WizardProps) {
   const [phase, setPhase] = useState<Phase>("usrdir");
   const [usrdir, setUsrdir] = useState<string>(() => loadUsrdir(gameId));
@@ -370,6 +381,58 @@ export function R2Wizard({
     return status.global_cached !== "missing";
   }, [status]);
 
+  /** RFOM (and any title that ships a single root-level `game.psarc`)
+   *  needs a pre-extract pass before any level is playable. A USRDIR
+   *  can already have level folders populated with dialogue streams
+   *  but still be unplayable — the marker is whether any level has a
+   *  `built/` subdirectory yet. */
+  const needsRootExtract = useMemo(() => {
+    if (!status || !status.is_usrdir) return false;
+    return (
+      (status.root_psarcs?.length ?? 0) > 0 && !status.any_level_built
+    );
+  }, [status]);
+
+  /** Externally-extracted state: no root PSARC to unpack, no globals to
+   *  extract, but levels are already populated under `packed/levels/`
+   *  with `built/` subdirectories. Common for RFOM users who decrypted
+   *  + extracted with an external tool, and for any V2 game whose cache
+   *  has been built once. The wizard skips globals + root extract and
+   *  goes straight to the map list. */
+  const canSkipToMaps = useMemo(() => {
+    if (!status || !status.is_usrdir) return false;
+    if (needsRootExtract) return false;
+    if (status.global_cached !== "missing") return false;
+    return status.any_level_built;
+  }, [status, needsRootExtract]);
+
+  const startRootExtract = useCallback(async () => {
+    if (!needsRootExtract || !usrdir.trim()) return;
+    saveUsrdir(gameId, usrdir.trim());
+    setPhase("root_extract");
+    setExtractBusy(true);
+    setExtractDone(false);
+    setExtract({ ...EMPTY_EXTRACT });
+    try {
+      await r2ExtractRootPsarcs(usrdir.trim(), (e: R2ExtractEvent) => {
+        applyExtractEvent(e, setExtract);
+        if (e.type === "done") {
+          setExtractBusy(false);
+          setExtractDone(true);
+        }
+      });
+      // After root extraction, packed/game + packed/levels should now
+      // exist — refresh the status so the wizard can route to either
+      // globals (if global PSARCs were just materialized) or straight
+      // to maps (RFOM's root archive holds everything; no separate
+      // globals step needed).
+      await refreshStatus(usrdir.trim());
+    } catch (e) {
+      setStatusError(String(e));
+      setExtractBusy(false);
+    }
+  }, [needsRootExtract, usrdir, gameId, refreshStatus]);
+
   const startGlobals = useCallback(async () => {
     if (!canProceedToGlobals || !usrdir.trim()) return;
     saveUsrdir(gameId, usrdir.trim());
@@ -399,7 +462,7 @@ export function R2Wizard({
     setMapsBusy(true);
     setMapsError(null);
     try {
-      const list = await r2ListMaps(usrdir.trim());
+      const list = await r2ListMaps(usrdir.trim(), entryFile);
       setMaps(list);
     } catch (e) {
       setMapsError(String(e));
@@ -493,7 +556,7 @@ export function R2Wizard({
       setPickedMap(m);
       if (m.ready) {
         try {
-          const path = await r2LevelOpenPath(usrdir.trim(), m.id);
+          const path = await r2LevelOpenPath(usrdir.trim(), m.id, entryFile);
           await prepareAndOpen(m.id, path);
         } catch (e) {
           setMapsError(String(e));
@@ -505,14 +568,19 @@ export function R2Wizard({
       setExtractDone(false);
       setExtract({ ...EMPTY_EXTRACT });
       try {
-        await r2ExtractLevel(usrdir.trim(), m.id, (e: R2ExtractEvent) => {
-          applyExtractEvent(e, setExtract);
-          if (e.type === "done") {
-            setExtractBusy(false);
-            setExtractDone(true);
-          }
-        });
-        const path = await r2LevelOpenPath(usrdir.trim(), m.id);
+        await r2ExtractLevel(
+          usrdir.trim(),
+          m.id,
+          (e: R2ExtractEvent) => {
+            applyExtractEvent(e, setExtract);
+            if (e.type === "done") {
+              setExtractBusy(false);
+              setExtractDone(true);
+            }
+          },
+          entryFile,
+        );
+        const path = await r2LevelOpenPath(usrdir.trim(), m.id, entryFile);
         await prepareAndOpen(m.id, path);
       } catch (e) {
         setMapsError(String(e));
@@ -524,6 +592,7 @@ export function R2Wizard({
 
   useEffect(() => {
     if (phase !== "maps" || !usrdir.trim()) return;
+    if (gameId === "r1") return;
     const files = [
       ...(ATLAS_BY_CATEGORY[activeCategory] ?? []),
       ...importedThumbs.map((f) => `imported:${f}`),
@@ -688,13 +757,15 @@ export function R2Wizard({
         <span>
           {gameLabel} : {phase === "usrdir"
             ? "USRDIR"
-            : phase === "globals"
-              ? "GLOBALS"
-              : phase === "maps"
-                ? `LEVELS : ${CATEGORY_LABEL[activeCategory].toUpperCase()}`
-                : phase === "level"
-                  ? "EXTRACT"
-                  : "PREPARE"}
+            : phase === "root_extract"
+              ? "GAME ARCHIVE"
+              : phase === "globals"
+                ? "GLOBALS"
+                : phase === "maps"
+                  ? `LEVELS : ${CATEGORY_LABEL[activeCategory].toUpperCase()}`
+                  : phase === "level"
+                    ? "EXTRACT"
+                    : "PREPARE"}
           {" :"}
         </span>
       }
@@ -736,16 +807,52 @@ export function R2Wizard({
         <div className="r2-step">
           <div className="source-info">
             <strong className="small">📦 What's a USRDIR?</strong>
-            <p className="small dim">
-              On a PS3 disc rip it's the folder right under{" "}
-              <code>PS3_GAME/</code> — e.g.{" "}
-              <code>...\R2 ISO\PS3_GAME\USRDIR\</code>. It contains{" "}
-              <code>packed/game/global_cached.psarc</code> and a{" "}
-              <code>packed/levels/</code> tree.
-            </p>
-            <p className="small dim">
-              We'll extract shared globals once into the same USRDIR (in
-              place), then ask which map to extract.
+            {gameId === "r1" ? (
+              <>
+                <p className="small dim">
+                  On a PS3 disc rip of RFOM it's the folder right under{" "}
+                  <code>PS3_GAME/</code> — e.g.{" "}
+                  <code>...\RFOM\PS3_GAME\USRDIR\</code>. It contains a
+                  root-level <code>game.psarc</code> (~6.5 GB) and a{" "}
+                  <code>packed/levels/</code> tree of dialogue streams.
+                </p>
+                <p className="small dim">
+                  We'll extract <code>game.psarc</code> once into the same
+                  USRDIR (in place), which materializes the playable level
+                  data, then ask which map to open.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="small dim">
+                  On a PS3 disc rip it's the folder right under{" "}
+                  <code>PS3_GAME/</code> — e.g.{" "}
+                  <code>...\{gameLabel} ISO\PS3_GAME\USRDIR\</code>. It
+                  contains <code>packed/game/global_cached.psarc</code> and a{" "}
+                  <code>packed/levels/</code> tree.
+                </p>
+                <p className="small dim">
+                  We'll extract shared globals once into the same USRDIR (in
+                  place), then ask which map to extract.
+                </p>
+              </>
+            )}
+            <p
+              className="small"
+              style={{
+                marginTop: 8,
+                padding: "8px 10px",
+                background: "rgba(91, 178, 255, 0.08)",
+                borderLeft: "2px solid var(--brand-color)",
+                borderRadius: 3,
+              }}
+            >
+              💡 <strong>Disc-format games:</strong> boot the game{" "}
+              <strong>at least once in RPCS3</strong> before pointing the
+              wizard here. RPCS3 decrypts the PS3 disc-key layer on first
+              run; without that pass <code>game.psarc</code> /{" "}
+              <code>global_*.psarc</code> stay encrypted and our PSARC
+              reader can't open them.
             </p>
           </div>
 
@@ -791,39 +898,69 @@ export function R2Wizard({
               {!status.is_usrdir ? (
                 <div className="error-banner">
                   This folder doesn't look like a USRDIR — no{" "}
-                  <code>packed/game/</code> or <code>packed/levels/</code>{" "}
-                  subdirectory.
+                  <code>packed/game/</code>, no <code>packed/levels/</code>,
+                  and no root-level <code>.psarc</code> archive.
                 </div>
               ) : (
                 <ul className="r2-status-list">
-                  <li>
-                    <span className="r2-status-label">global_cached.psarc</span>
-                    {psarcStateBadge(status.global_cached)}
-                  </li>
-                  <li>
-                    <span className="r2-status-label">
-                      global_uncached.psarc
-                    </span>
-                    {psarcStateBadge(status.global_uncached)}
-                  </li>
-                  <li>
-                    <span className="r2-status-label">levels/</span>
-                    <span className="r2-badge r2-badge-info">
-                      {status.level_folder_count} folder
-                      {status.level_folder_count === 1 ? "" : "s"}
-                    </span>
-                  </li>
+                  {(status.root_psarcs?.length ?? 0) > 0 ? (
+                    <>
+                      {status.root_psarcs.map((name) => (
+                        <li key={name}>
+                          <span className="r2-status-label">{name}</span>
+                          <span className="r2-badge r2-badge-info">
+                            {status.any_level_built
+                              ? "Already extracted"
+                              : "Needs extract"}
+                          </span>
+                        </li>
+                      ))}
+                      <li>
+                        <span className="r2-status-label">levels/</span>
+                        <span className="r2-badge r2-badge-info">
+                          {status.level_folder_count} folder
+                          {status.level_folder_count === 1 ? "" : "s"}
+                          {status.any_level_built ? " · built" : " · pre-extract"}
+                        </span>
+                      </li>
+                    </>
+                  ) : (
+                    <>
+                      <li>
+                        <span className="r2-status-label">
+                          global_cached.psarc
+                        </span>
+                        {psarcStateBadge(status.global_cached)}
+                      </li>
+                      <li>
+                        <span className="r2-status-label">
+                          global_uncached.psarc
+                        </span>
+                        {psarcStateBadge(status.global_uncached)}
+                      </li>
+                      <li>
+                        <span className="r2-status-label">levels/</span>
+                        <span className="r2-badge r2-badge-info">
+                          {status.level_folder_count} folder
+                          {status.level_folder_count === 1 ? "" : "s"}
+                        </span>
+                      </li>
+                    </>
+                  )}
                 </ul>
               )}
               {status.is_usrdir &&
+                (status.root_psarcs?.length ?? 0) === 0 &&
+                !status.any_level_built &&
                 status.global_cached === "missing" && (
                   <div className="error-banner">
-                    <code>global_cached.psarc</code> is missing — R2 needs at
-                    least this archive to render anything. Pointing at the
-                    wrong folder?
+                    <code>global_cached.psarc</code> is missing — {gameLabel}{" "}
+                    needs at least this archive to render anything. Pointing
+                    at the wrong folder?
                   </div>
                 )}
               {status.is_usrdir &&
+                (status.root_psarcs?.length ?? 0) === 0 &&
                 status.global_uncached === "missing" &&
                 status.global_cached !== "missing" && (
                   <div className="open-level-warning">
@@ -836,10 +973,30 @@ export function R2Wizard({
         </div>
       )}
 
-      {phase === "globals" && (
+      {(phase === "globals" || phase === "root_extract") && (
         <div className="r2-step">
           <ExtractProgressView state={extract} done={extractDone} busy={extractBusy} />
-          {extractDone && (
+          {extractDone && extract.succeeded.length === 0 && (
+            <div className="error-banner">
+              {phase === "root_extract" ? (
+                <>
+                  Nothing was extracted from the root archive — every{" "}
+                  <code>.psarc</code> rejected the standard PSARC magic.
+                  The file is most likely still encrypted at the PS3
+                  disc-key level.
+                  <br />
+                  <br />
+                  💡 <strong>Boot the game at least once in RPCS3</strong>{" "}
+                  first. RPCS3's first-run pass decrypts disc files into a
+                  PSARC-readable state. Then point the wizard back at the
+                  same USRDIR.
+                </>
+              ) : (
+                `Nothing was extracted. Every global .psarc failed — check the warning(s) below.`
+              )}
+            </div>
+          )}
+          {extractDone && extract.succeeded.length > 0 && (
             <div
               className="open-level-hint small"
               style={{
@@ -847,7 +1004,11 @@ export function R2Wizard({
                 background: "rgba(74, 222, 128, 0.06)",
               }}
             >
-              ✓ Globals ready. Continue to pick a map.
+              ✓ {phase === "root_extract"
+                ? `Game archive extracted (${extract.succeeded.length} .psarc${
+                    extract.succeeded.length === 1 ? "" : "s"
+                  }). Continue to pick a map.`
+                : "Globals ready. Continue to pick a map."}
             </div>
           )}
         </div>
@@ -1089,6 +1250,18 @@ export function R2Wizard({
               <span className="small dim">{pickedMap.display_name}</span>
             </div>
           )}
+          <div className="r2-busy-banner">
+            <span className="r2-busy-banner-icon" aria-hidden>⚠</span>
+            <div className="r2-busy-banner-body">
+              <strong>Don't close the app — it's working.</strong>
+              <span>
+                Extraction is heavy I/O. The window may stop responding
+                for several seconds at a time on large PSARCs — that's
+                normal. Wait until the progress bar finishes; force-quitting
+                now leaves a half-extracted level that won't open.
+              </span>
+            </div>
+          </div>
           <ExtractProgressView state={extract} done={extractDone} busy={extractBusy} />
           {mapsError && <div className="error-banner">{mapsError}</div>}
         </div>
@@ -1102,6 +1275,19 @@ export function R2Wizard({
               <span className="small dim">{pickedMap.display_name}</span>
             </div>
           )}
+          <div className="r2-busy-banner">
+            <span className="r2-busy-banner-icon" aria-hidden>⚠</span>
+            <div className="r2-busy-banner-body">
+              <strong>Don't close the app — it's working.</strong>
+              <span>
+                Cache build decodes every moby / tie / texture in the level.
+                The UI can stutter or freeze briefly while large assets are
+                processed. Hang on until the progress bar reaches the end —
+                quitting mid-build wastes the work and forces a full
+                rebuild next time.
+              </span>
+            </div>
+          </div>
           <div className="source-info">
             <strong className="small">
               {prepareMode === "rebuild"
@@ -1145,6 +1331,34 @@ export function R2Wizard({
 
   function renderFooter() {
     if (phase === "usrdir") {
+      if (needsRootExtract) {
+        return (
+          <>
+            <Button onClick={onClose}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={startRootExtract}
+              disabled={statusBusy || busy}
+            >
+              Extract game archive →
+            </Button>
+          </>
+        );
+      }
+      if (canSkipToMaps) {
+        return (
+          <>
+            <Button onClick={onClose}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={() => void continueToMaps()}
+              disabled={statusBusy || busy}
+            >
+              Pick a map →
+            </Button>
+          </>
+        );
+      }
       return (
         <>
           <Button onClick={onClose}>Cancel</Button>
@@ -1157,6 +1371,44 @@ export function R2Wizard({
             status?.global_uncached === "ready"
               ? "Continue →"
               : "Extract globals →"}
+          </Button>
+        </>
+      );
+    }
+    if (phase === "root_extract") {
+      const canContinue = extractDone && !busy && extract.succeeded.length > 0;
+      // After root extract, decide next step: globals if either global
+      // PSARC is now present, otherwise jump straight to maps.
+      const nextLabel =
+        status &&
+        (status.global_cached !== "missing" ||
+          status.global_uncached !== "missing")
+          ? "Continue to globals →"
+          : "Pick a map →";
+      const goNext = () => {
+        if (
+          status &&
+          (status.global_cached !== "missing" ||
+            status.global_uncached !== "missing")
+        ) {
+          setPhase("globals");
+        } else {
+          void continueToMaps();
+        }
+      };
+      return (
+        <>
+          <Button
+            onClick={() => setPhase("usrdir")}
+            disabled={extractBusy}
+          >
+            <ArrowLeft size={12} strokeWidth={2} /> Back
+          </Button>
+          <Button onClick={onClose} disabled={extractBusy}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={goNext} disabled={!canContinue}>
+            {nextLabel}
           </Button>
         </>
       );
@@ -1246,6 +1498,7 @@ function applyExtractEvent(
         current: prev.total,
         lastFile: e.skipped ? "(already extracted)" : "(done)",
         skipped: e.skipped ? [...prev.skipped, e.psarc] : prev.skipped,
+        succeeded: [...prev.succeeded, e.psarc],
       }));
       break;
     case "warning":

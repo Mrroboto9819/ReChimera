@@ -1186,6 +1186,15 @@ export interface R2SetupStatus {
   global_cached: R2PsarcState;
   global_uncached: R2PsarcState;
   level_folder_count: number;
+  /** RFOM and similar Insomniac titles ship a root-level `game.psarc`
+   *  that must be extracted before any level is playable. When this
+   *  array is non-empty and `any_level_built === false`, the wizard
+   *  runs the pre-extract step automatically. */
+  root_psarcs: string[];
+  /** True when at least one level folder has a `built/` subdirectory.
+   *  Distinguishes "USRDIR has level folders but they're just dialogue
+   *  streams" (RFOM pre-extract) from "USRDIR is fully unpacked". */
+  any_level_built: boolean;
 }
 
 export type R2MapCategory = "campaign" | "multiplayer" | "coop" | "lobby" | "other";
@@ -1209,8 +1218,8 @@ export type R2ExtractEvent =
 export const r2SetupCheck = (usrdir: string) =>
   invoke<R2SetupStatus>("r2_setup_check", { usrdir });
 
-export const r2ListMaps = (usrdir: string) =>
-  invoke<R2MapInfo[]>("r2_list_maps", { usrdir });
+export const r2ListMaps = (usrdir: string, entryFile?: string) =>
+  invoke<R2MapInfo[]>("r2_list_maps", { usrdir, entryFile });
 
 export function r2ExtractGlobals(
   usrdir: string,
@@ -1221,18 +1230,32 @@ export function r2ExtractGlobals(
   return invoke<void>("r2_extract_globals", { usrdir, onEvent: ch });
 }
 
-export function r2ExtractLevel(
+/** Pre-extract step for RFOM — unpacks any `.psarc` sitting at the
+ *  USRDIR root (e.g. `game.psarc`) into the USRDIR itself, materializing
+ *  the `packed/game/` + `packed/levels/<level>/` tree the wizard
+ *  expects. No-op for V2 USRDIRs (no root PSARCs). */
+export function r2ExtractRootPsarcs(
   usrdir: string,
-  mapId: string,
   onEvent: (e: R2ExtractEvent) => void,
 ): Promise<void> {
   const ch = new Channel<R2ExtractEvent>();
   ch.onmessage = onEvent;
-  return invoke<void>("r2_extract_level", { usrdir, mapId, onEvent: ch });
+  return invoke<void>("r2_extract_root_psarcs", { usrdir, onEvent: ch });
 }
 
-export const r2LevelOpenPath = (usrdir: string, mapId: string) =>
-  invoke<string>("r2_level_open_path", { usrdir, mapId });
+export function r2ExtractLevel(
+  usrdir: string,
+  mapId: string,
+  onEvent: (e: R2ExtractEvent) => void,
+  entryFile?: string,
+): Promise<void> {
+  const ch = new Channel<R2ExtractEvent>();
+  ch.onmessage = onEvent;
+  return invoke<void>("r2_extract_level", { usrdir, mapId, entryFile, onEvent: ch });
+}
+
+export const r2LevelOpenPath = (usrdir: string, mapId: string, entryFile?: string) =>
+  invoke<string>("r2_level_open_path", { usrdir, mapId, entryFile });
 
 export const r2CacheNeedsRebuild = (usrdir: string, mapId: string) =>
   invoke<boolean>("r2_cache_needs_rebuild", { usrdir, mapId });

@@ -328,6 +328,98 @@ IT has no UI/menu extractor. R2 stores level-select art somewhere in `global_*.p
 
 ---
 
+## 5c. Recent changes — session 2026-05-26
+
+This session: skin/theme infrastructure, V2 game wizard generalization, image/sound conventions, FallbackImage + SearchField extracted as reusable skin-aware components, merge with experimental branch (animation + material + AssetWorkbench fixes landed; vk-ripper excluded). Build is TS-clean and Rust-clean throughout.
+
+### 5c.1 App skin system — open registry, per-skin CSS + modal variants
+- **Registry:** `store.ts::APP_SKINS` is an `AppSkinDef[]`. Each entry has `id`, `label`, `allowedModes: ThemeMode[]`, optional `modalClass` (CSS class added to `.modal-dialog` when active), optional `primaryColor` (locks brand color when set), optional `description`. New skins land by pushing into the array + shipping a CSS block scoped to `:root[data-app-skin="<id>"]`. No closed union; `AppSkin = string`.
+- **Shipped skins:**
+  - `default` — standard look, supports both dark and light modes.
+  - `resistance2` — amber HUD with corner brackets (`modal-dialog--hud`), dark-only, primary `#d4b860`.
+  - `resistance3` — aged-paper wartime journal (`modal-dialog--journal`), serif headings, deep red `#8a1f1f`, **light-only**.
+  - `resistance1` (RFOM) — olive army-drab + rust patina (`modal-dialog--metal`), CRT scanlines app-wide, screws at modal corners, dusty yellow `#d4b048`, dark-only.
+  - `racit` (R&C: A Crack in Time) — cosmic navy + warm orange (`modal-dialog--cosmic`), rounded panels with light edges, orange `#f0a830`, dark-only.
+- **Mode locking:** `setAppSkin` reducer auto-snaps `theme` to the first allowed mode when the user picks a dark-only skin while in light mode (and vice-versa). `setTheme` clamps to allowed modes too. Settings UI disables the disallowed mode button with a hint.
+- **Primary color override:** `useApplySettings` applies `getAppSkin(appSkin).primaryColor ?? brand` to `--brand-color`, `--accent-blue`, `--tint-blue`. When the active skin locks the color, the Settings `ColorField` for brand color goes disabled with a tooltip ("Locked by the <skin> skin").
+- **Document attribute:** `data-app-skin="<id>"` is written on `<html>` by `useApplySettings`. All skin CSS is scoped to `:root[data-app-skin="<id>"]` so it composes with the existing `data-theme="dark|light"` axis.
+- **Modal variant:** `Modal.tsx` reads `appSkin` from Redux, looks up `getAppSkin(skin).modalClass`, appends it to `.modal-dialog`. Adds 4 decorative corner-bracket `<span>` elements when `modalClass === "modal-dialog--hud"`. No `theme="hud"` prop on individual modals anymore — fully driven by global state.
+
+### 5c.2 Per-game image convention (drop a PNG, it shows up)
+- **Rule:** Drop a PNG at `apps/desktop/public/<game_id>/maps/<level_folder_name>.png`. No registration, no curated list, no per-game special cases. Path is built from the level folder name (lowercase).
+- **Game IDs** (from `OpenLevelModal::GAMES`):
+  - `r1` — RFOM
+  - `r2` — Resistance 2
+  - `r3` — Resistance 3
+  - `rc_tod` — Tools of Destruction
+  - `rc_acit` — A Crack in Time
+  - `rc_ffa` — Full Frontal Assault
+  - `rc_a4o` — All 4 One
+- **SP fallback for coop/MP folders:** For a level folder ending in `_coop` or `_multiplayer` (with optional `_N` suffix), the resolver also tries the bare stem. E.g. `chicago_coop` → first `chicago_coop.png`, then `chicago.png`. Lets you ship one image per stem and have all variants pick it up.
+- **Franchise placeholder when nothing matches:** `franchisePlaceholder(gameId)` returns `/r_notset.webp` for Resistance games (`r1`/`r2`/`r3`), `/rc_notset.jpeg` for R&C games (`rc_*`). Rendered as a dimmed background with a centered "No image available" overlay. Both files live at `apps/desktop/public/`.
+- **Naming gotcha:** the R&C placeholder was originally `r&c_notset.jpeg` — `&` in URL paths round-trips badly through Vite's static handler (encoded `%26` doesn't reliably decode back to `&` for file matching). Renamed to `rc_notset.jpeg`. **Don't use `&` in any `public/` filename.**
+- **`<FallbackImage>` component** (`apps/desktop/src/components/FallbackImage.tsx`) is the single consumer. Takes `candidates: string[]`, walks them via `onError`, renders the first that loads; if all fail and `placeholder` is set, switches to a wrapper `<span>` with the placeholder `<img>` + overlay label. Exports `levelThumbCandidates(mapId, gameId)`, `levelThumbCandidatesFromPath(folderPath, gameId)`, and `franchisePlaceholder(gameId)` helpers.
+- **Two call sites:**
+  - `R2Wizard.tsx` preview pane — for the active map.
+  - `OpenLevelModal.tsx` recents list — thumbnail per recent folder (smaller, label shrunk to 8px via `.open-level-recent-thumb.fallback-image .fallback-image-overlay`).
+- **R2 preview pane `object-fit`:** set to `contain` (was `cover`) so non-16:9 images letterbox rather than crop. Applies to both real images and the placeholder wrapper.
+
+### 5c.3 V2 wizard generalized for all V2 games
+- `R2Wizard.tsx` accepts optional `gameId?: string` (default `"r2"`) and `gameLabel?: string` (default `"R2"`). Title breadcrumb uses `gameLabel`. The USRDIR localStorage key is per-game: `rechimera.usrdir.last.<gameId>` with legacy fallback to `rechimera.r2.lastUsrdir` for existing R2 users.
+- `OpenLevelModal::pickGame` now routes **any supported game with `entryFile === "assetlookup.dat"`** through the wizard — that's R2, R3, ACiT, A4O, and FFA (once marked supported). RFOM and ToD still use the generic folder picker.
+- The same `r2_*` Tauri commands serve all V2 games — they work on any V2 USRDIR layout (`packed/game/global_cached.psarc` + `packed/levels/`), which is the shared Insomniac convention. **Backend command names retain `r2_` prefix** despite working for any V2 game; renaming would be churn without functional benefit.
+
+### 5c.4 PSARC extraction is name-agnostic
+- `r2.rs::r2_extract_level` no longer hardcodes the `["level_cached", "level_uncached"]` names. Now does `read_dir(level_dir)` and extracts **every `.psarc`** (case-insensitive), sorted alphabetically. Empty-folder case returns a clean error. Bank labels in progress events come from each file's stem.
+- `r2_list_maps` `psarc_present` flag now uses the same "any `.psarc` present" check.
+- **Why it matters:** Mods, DLC archives, or any non-standard packing names (`level0.psarc`, `mp_dlc_pack.psarc`, etc.) work automatically. No mod-specific code paths.
+
+### 5c.5 UI sound system — per-skin folders, global click delegate
+- **Folder convention:** `apps/desktop/public/ui-effects/<skin_id>/<event>.<ext>`. Extensions tried in order: `.wav` → `.ogg` → `.mp3`. First match wins per `(skin, event)` pair, cached. Missing files = silent no-op (no 404 noise).
+- **Events the runtime emits automatically:**
+  - `select` — any `<button>` / `.btn` / `[role="option"]` click that isn't primary or disabled
+  - `confirm` — `.btn-primary` clicks
+  - `error` — disabled-element clicks (`disabled` attr or `aria-disabled="true"`)
+  - `modal-open` — any `<Modal open>` transition from closed → open (wired in `Modal.tsx::useEffect` watching `prevOpenRef`)
+  - `back` — any `<Modal>` close transition (Escape / backdrop / close X)
+  - `skin-switch` — when user changes skin in Settings; plays on the **new** skin
+  - `hover` — reserved, no listener wired (hovers are noisy by default)
+- **Modal close-X carries `data-no-sound`** so it doesn't double-fire `select` + `back`. Any element with `data-no-sound` is skipped by the global click delegate. Footer Cancel buttons still fire both `select` and `back` — acceptable since they ARE button clicks AND back actions; add `data-no-sound` per-button if you want only one.
+- **Components:**
+  - `apps/desktop/src/useUiSound.ts` — `useUiSound()` hook returns a memoized `play(event)`. Lazy-loads via `Audio()`, caches per `(skin, event)`, clones the buffer per play so rapid repeats overlap. Catches autoplay rejections silently.
+  - `useGlobalUiSounds()` — installs the document-level click delegate + skin-switch watcher. Called once from `App.tsx` (after `useApplySettings`).
+- **Redux:** `settings.uiSoundEnabled: boolean` (default `true`), `settings.uiSoundVolume: number` 0-1 (default `0.6`). `setUiSoundVolume` clamps to [0,1]. UI on/off + slider live in **Settings → General → "UI sound effects"** and **"UI sound volume"**.
+- **No-op when disabled:** `play()` short-circuits at the top via a ref-tracked enabled flag, so flipping the toggle takes effect immediately without re-mounting anything.
+
+### 5c.6 SearchField component — reusable, skin-aware
+- `apps/desktop/src/components/SearchField.tsx`. `<SearchField value onChange placeholder ariaLabel hotkey="/" />`. Wraps an `<input>` with leading search icon + clearable X button. Forwarded ref. `hotkey` option installs a global keydown listener that focuses the input on the given key (ignores typing while another input is focused).
+- Styled in default + `[data-app-skin]` overrides for each shipped skin (HUD amber, journal serif italic, RFOM olive stencil, ACiT navy glow).
+- Replaced the inline `select-search` markup in `R2Wizard`'s maps phase.
+
+### 5c.7 Merge with experimental branch (excluding vk-ripper)
+- Merged `079cf45` (and its parent `0362e75`) from `experimental/vukanripper` into `develop`. Excluded the two top commits: `6e2544a` (vk_png_ripper working) and `3bcbd46` (vulkan export png). Strategy: committed local WIP first as `dd46028`, then `git merge --no-ff 079cf45`, then resolved 5 conflicts.
+- **Animation fix landed cleanly** (no conflicts in `cache.rs` / `lunalib/animation.rs`): the §3.1 frame_stride padding fix + §3.2 additive `numBones` override are now permanent. Memory entries §3.1 / §3.2 promoted to invariants.
+- **Material fix landed** (`crates/lunalib/src/gltf_export.rs::build_material`): binds albedo + normal + emissive when present, only returns `None` when ALL THREE are missing. `emissive_factor = [0,0,0]` so the "expensive" map (Insomniac slot 3) is exported for downstream tools (Blender / Unreal) but contributes zero to the GLB preview — **keeps albedo dominant on top**. The diffuse name is `mat_a<id>_n<id>_e<id>` so debug logs identify which texture combos exist per submesh.
+- **AssetWorkbench view** (`apps/desktop/src/views/AssetWorkbench.tsx`) and `texture_global.rs` (NEW, 339 lines) both came over from the merge; both already documented in §5b.8-5b.10.
+- **Conflicts resolved by keeping HEAD's evolved versions:** `r2.rs` (name-agnostic extract beats hardcoded names), `R2Wizard.tsx` (gameId/gameLabel + FallbackImage + SearchField beats older inline search), `OpenLevelModal.tsx` (FallbackImage + per-game image routing).
+- **Conflicts resolved by merging both sides:** `api.ts` (kept HEAD's compact code + 079cf45's JSDoc comments), `styles.css` (both skin themes + AssetWorkbench CSS).
+- **Deduped:** `image` + `zip` Cargo deps (both sides added), `bulk_extract_sounds_zip` Rust function (kept ours), the duplicate `bulkExtractSoundsZip` TS import + redeclaration in `CacheLibraryModal` / `api.ts`. Our standalone "Download all as ZIP" button was removed; the merge's "Extract all → .zip" in the selection toolbar is the canonical bulk-zip UI.
+- **Excluded vk-ripper commits** contain: `crates/vk-ripper` (Vulkan layer DLL for RPCS3 texture interception), `crates/vkripper-decode` CLI, `apps/vkripper-tray` Tauri tray app, and `crates/psarc2` (separate PSARC reader/writer with CLI binary). The user intentionally deferred these — they may come back later, but ReChimera's render-only path doesn't need them.
+- **Reset path if needed:** `git reset --hard 3aa96e6` returns to pre-WIP develop. `git reset --hard dd46028` returns to post-WIP / pre-merge. Both commits still in reflog.
+
+### 5c.8 TabContainer hardened against stale persisted tab IDs
+- Persisted Redux state (via redux-persist) can carry tab IDs from older versions of the app that aren't in `VIEW_META` anymore. Walking those IDs used to throw `Cannot read properties of undefined (reading 'i18nKey')` and crash the whole panel.
+- Added `if (!meta) return null` guards at all three `VIEW_META[id]` lookups in `views/TabContainer.tsx` (the tab strip render, the `availableViews` filter for the `+` picker, and the picker item render). Unknown tab IDs are now silently skipped — no crash, no `localStorage.clear()` workaround needed.
+
+### 5c.9 Memory entries to add (this session)
+- `memory/project_app_skin_registry.md` — new (APP_SKINS shape, mode-locking, brand-color override, modal-class hook, attribute scoping)
+- `memory/project_per_game_image_convention.md` — new (`/<gameId>/maps/<level>.png`, SP-stem fallback, franchise placeholder URLs, no `&` in `public/` filenames)
+- `memory/project_ui_sound_system.md` — new (folder convention, 6 events + which auto-fire, `data-no-sound` opt-out, hook + global delegate, Redux settings)
+- `memory/project_v2_wizard_generalization.md` — new (gameId/gameLabel props, per-game USRDIR key, V2 detection rule for routing)
+- `memory/project_psarc_extraction_name_agnostic.md` — new (drop the hardcoded filename list, read_dir for any `.psarc`)
+
+---
+
 ## 6. Debugging methodology (for unknown formats)
 
 When porting a new IGHW section or struct, follow this loop (codified in `docs/internal/lunalib-and-IT/09-debugging-methodology.md`):

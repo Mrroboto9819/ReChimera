@@ -94,7 +94,9 @@ export function useUiSound() {
       // Clone so rapid repeats (multiple clicks in quick succession)
       // can overlap instead of restarting a single buffer.
       const clone = audio.cloneNode() as HTMLAudioElement;
-      clone.volume = volumeRef.current;
+      const raw = volumeRef.current;
+      const vol = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0.6;
+      clone.volume = vol;
       const result = clone.play();
       if (result && typeof result.catch === "function") {
         result.catch(() => {

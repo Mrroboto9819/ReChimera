@@ -3075,6 +3075,7 @@ fn main() {
             r2::r2_setup_check,
             r2::r2_list_maps,
             r2::r2_extract_globals,
+            r2::r2_extract_root_psarcs,
             r2::r2_extract_level,
             r2::r2_level_open_path,
             r2::r2_cache_needs_rebuild,

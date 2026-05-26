@@ -347,10 +347,19 @@ export function OpenLevelModal({
     setPsarcError(null);
     setPsarcProgress(null);
     setPsarcDone(false);
-    // Any V2 game (assetlookup.dat USRDIR layout) shares the same
-    // wizard flow: USRDIR → globals → maps → level.
+    // The USRDIR wizard handles any Insomniac game whose USRDIR layout
+    // matches `packed/game/` + `packed/levels/<level>/` — that's both V2
+    // (R2/R3/ACiT/A4O/FFA, assetlookup.dat marker) and RFOM
+    // (ps3levelmain.dat marker). The per-game ready filename is passed
+    // down via the wizard's `entryFile` prop. ToD's `main.dat` layout
+    // is different (no per-level psarc tree) so it still uses the
+    // generic folder picker.
     const spec = GAMES.find((g) => g.id === id);
-    if (spec && spec.entryFile === "assetlookup.dat" && spec.supported) {
+    const wizardEligible =
+      spec?.supported &&
+      (spec.entryFile === "assetlookup.dat" ||
+        spec.entryFile === "ps3levelmain.dat");
+    if (wizardEligible) {
       setR2WizardOpen(true);
       return;
     }
@@ -638,19 +647,21 @@ export function OpenLevelModal({
   if (r2WizardOpen && game) {
     const wizardSpec = GAMES.find((g) => g.id === game);
     const wizardLabel = wizardSpec?.short ?? "R2";
+    const wizardEntryFile = wizardSpec?.entryFile ?? "assetlookup.dat";
     return (
       <R2Wizard
         open={open}
         busy={busy}
         gameId={game}
         gameLabel={wizardLabel}
+        entryFile={wizardEntryFile}
         onClose={() => {
           setR2WizardOpen(false);
           onClose();
         }}
-        onOpen={(folder) => {
+        onOpen={(folder, opts) => {
           pushRecent(game, folder);
-          onOpen(folder);
+          onOpen(folder, opts);
         }}
       />
     );

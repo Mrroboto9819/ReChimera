@@ -17,6 +17,17 @@ pub struct R2SetupStatus {
     pub global_cached: PsarcState,
     pub global_uncached: PsarcState,
     pub level_folder_count: usize,
+    /// RFOM (and possibly other Insomniac titles) ship a root-level
+    /// `game.psarc` that has to be extracted before any level becomes
+    /// playable. V2 USRDIRs (R2/R3/ACiT/A4O) have nothing at root → list
+    /// is empty.
+    pub root_psarcs: Vec<String>,
+    /// True when at least one level folder under `packed/levels/<level>/`
+    /// has a `built/` subdirectory. Used to detect "RFOM pre-extract
+    /// needed" — a USRDIR can have level folders populated with dialogue
+    /// streams but still be unplayable until `game.psarc` is unpacked,
+    /// at which point `built/` materializes.
+    pub any_level_built: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -54,23 +65,68 @@ pub fn r2_setup_check(usrdir: String) -> R2SetupStatus {
     let root = Path::new(&usrdir);
     let packed_game = root.join("packed").join("game");
     let packed_levels = root.join("packed").join("levels");
-    let is_usrdir = packed_game.is_dir() && packed_levels.is_dir();
-    let level_folder_count = if is_usrdir {
+
+    // List any `.psarc` at the USRDIR root — RFOM ships `game.psarc`
+    // here that has to be extracted before `packed/levels/` exists.
+    let root_psarcs: Vec<String> = std::fs::read_dir(root)
+        .ok()
+        .map(|it| {
+            it.flatten()
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .filter_map(|e| {
+                    let p = e.path();
+                    let ext_match = p
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.eq_ignore_ascii_case("psarc"))
+                        .unwrap_or(false);
+                    if ext_match {
+                        e.file_name().to_str().map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let (level_folder_count, any_level_built) = if packed_levels.is_dir() {
         std::fs::read_dir(&packed_levels)
             .map(|it| {
-                it.filter_map(|e| e.ok())
-                    .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                    .count()
+                let mut count = 0usize;
+                let mut any_built = false;
+                for e in it.flatten() {
+                    if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        continue;
+                    }
+                    count += 1;
+                    if !any_built && level_dir_is_extracted(&e.path()) {
+                        any_built = true;
+                    }
+                }
+                (count, any_built)
             })
-            .unwrap_or(0)
+            .unwrap_or((0, false))
     } else {
-        0
+        (0, false)
     };
+
+    // Accept the folder as a USRDIR in three cases:
+    //  - V2 layout already present (packed/game/ + packed/levels/)
+    //  - A root-level PSARC is waiting to be unpacked (RFOM fresh disc)
+    //  - Levels are already extracted by an external tool — packed/levels/
+    //    has folders with `built/` subdirectories (RFOM pre-extracted case).
+    let is_usrdir = (packed_game.is_dir() && packed_levels.is_dir())
+        || !root_psarcs.is_empty()
+        || (packed_levels.is_dir() && any_level_built);
+
     R2SetupStatus {
         is_usrdir,
         global_cached: global_psarc_state(&packed_game, "global_cached"),
         global_uncached: global_psarc_state(&packed_game, "global_uncached"),
         level_folder_count,
+        root_psarcs,
+        any_level_built,
     }
 }
 
@@ -89,8 +145,15 @@ fn global_psarc_state(packed_game: &Path, variant: &str) -> PsarcState {
     }
 }
 
+/// `entry_file` is the per-game ready marker (defaults to V2's
+/// `assetlookup.dat`). RFOM passes `ps3levelmain.dat`. Used both for
+/// the ready flag in the maps list and for resolving the open path.
 #[tauri::command]
-pub fn r2_list_maps(usrdir: String) -> Result<Vec<R2MapInfo>, String> {
+pub fn r2_list_maps(
+    usrdir: String,
+    entry_file: Option<String>,
+) -> Result<Vec<R2MapInfo>, String> {
+    let entry_file = entry_file.unwrap_or_else(|| "assetlookup.dat".to_string());
     let levels = Path::new(&usrdir).join("packed").join("levels");
     let it = std::fs::read_dir(&levels).map_err(|e| format!("read packed/levels/: {e}"))?;
     let mut out = Vec::new();
@@ -103,12 +166,7 @@ pub fn r2_list_maps(usrdir: String) -> Result<Vec<R2MapInfo>, String> {
         };
         let folder = entry.path();
         let category = classify_map(&name);
-        let level_lookup = folder
-            .join("built")
-            .join("levels")
-            .join(&name)
-            .join("assetlookup.dat");
-        let ready = level_lookup.is_file();
+        let ready = resolve_level_data_dir(&folder, &name, &entry_file).is_some();
         let psarc_present = std::fs::read_dir(&folder)
             .ok()
             .map(|it| {
@@ -134,9 +192,65 @@ pub fn r2_list_maps(usrdir: String) -> Result<Vec<R2MapInfo>, String> {
         if by_cat != std::cmp::Ordering::Equal {
             return by_cat;
         }
-        a.display_name.cmp(&b.display_name)
+        natural_cmp(&a.id, &b.id).then_with(|| a.display_name.cmp(&b.display_name))
     });
     Ok(out)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum NaturalChunk<'a> {
+    Text(&'a str),
+    Number(u64),
+}
+
+impl<'a> NaturalChunk<'a> {
+    fn cmp_chunk(&self, other: &NaturalChunk<'a>) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (NaturalChunk::Number(a), NaturalChunk::Number(b)) => a.cmp(b),
+            (NaturalChunk::Text(a), NaturalChunk::Text(b)) => {
+                a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase())
+            }
+            (NaturalChunk::Number(_), NaturalChunk::Text(_)) => Ordering::Less,
+            (NaturalChunk::Text(_), NaturalChunk::Number(_)) => Ordering::Greater,
+        }
+    }
+}
+
+fn split_natural(s: &str) -> Vec<NaturalChunk<'_>> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let is_digit = bytes[i].is_ascii_digit();
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() == is_digit {
+            i += 1;
+        }
+        let slice = &s[start..i];
+        if is_digit {
+            if let Ok(n) = slice.parse::<u64>() {
+                out.push(NaturalChunk::Number(n));
+            } else {
+                out.push(NaturalChunk::Text(slice));
+            }
+        } else {
+            out.push(NaturalChunk::Text(slice));
+        }
+    }
+    out
+}
+
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let ca = split_natural(a);
+    let cb = split_natural(b);
+    for (x, y) in ca.iter().zip(cb.iter()) {
+        let o = x.cmp_chunk(y);
+        if o != std::cmp::Ordering::Equal {
+            return o;
+        }
+    }
+    ca.len().cmp(&cb.len())
 }
 
 fn classify_map(name: &str) -> R2MapCategory {
@@ -198,12 +312,102 @@ pub fn r2_extract_globals(
     Ok(())
 }
 
+/// Pre-extract step for games (RFOM) that ship a single root-level
+/// `game.psarc` in the USRDIR. Extracts every `.psarc` sitting at the
+/// USRDIR root into the USRDIR itself — the archive's internal paths
+/// (`packed/game/...`, `packed/levels/<level>/...`) reconstitute the
+/// folder tree the rest of the wizard expects. After this completes
+/// the frontend re-runs `r2_setup_check` and proceeds with the normal
+/// globals → maps → level flow.
+#[tauri::command]
+pub fn r2_extract_root_psarcs(
+    usrdir: String,
+    on_event: Channel<R2ExtractEvent>,
+) -> Result<(), String> {
+    let root = Path::new(&usrdir);
+    if !root.is_dir() {
+        let msg = format!("usrdir not a directory: {}", root.display());
+        let _ = on_event.send(R2ExtractEvent::Error {
+            message: msg.clone(),
+        });
+        return Err(msg);
+    }
+    let mut psarcs: Vec<PathBuf> = std::fs::read_dir(root)
+        .map_err(|e| format!("read_dir {}: {e}", root.display()))?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.extension()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.eq_ignore_ascii_case("psarc"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    psarcs.sort();
+
+    if psarcs.is_empty() {
+        let msg = format!("no root-level .psarc files in {}", root.display());
+        let _ = on_event.send(R2ExtractEvent::Error {
+            message: msg.clone(),
+        });
+        return Err(msg);
+    }
+
+    for psarc in &psarcs {
+        let label = psarc
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("psarc")
+            .to_string();
+        if let Some(diag) = sniff_psarc_magic(psarc) {
+            let _ = on_event.send(R2ExtractEvent::Warning {
+                message: format!("{label}: {diag}"),
+            });
+            continue;
+        }
+        if let Err(e) = extract_one_psarc(psarc, root, None, &label, &on_event) {
+            let _ = on_event.send(R2ExtractEvent::Warning {
+                message: format!("{label}: {e}"),
+            });
+        }
+    }
+    let _ = on_event.send(R2ExtractEvent::Done);
+    Ok(())
+}
+
+fn sniff_psarc_magic(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut buf = [0u8; 4];
+    if f.read_exact(&mut buf).is_err() {
+        return Some(format!("file is shorter than 4 bytes: {}", path.display()));
+    }
+    if &buf == b"PSAR" {
+        return None;
+    }
+    let hex = buf
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(format!(
+        "first 4 bytes are [{hex}], not 'PSAR' (50 53 41 52). \
+         File appears to still be encrypted at the PS3 disc-key level. \
+         Boot the game at least once in RPCS3 first — that pass decrypts \
+         disc files into a PSARC-readable state — then re-point the \
+         wizard at the same USRDIR."
+    ))
+}
+
 #[tauri::command]
 pub fn r2_extract_level(
     usrdir: String,
     map_id: String,
+    entry_file: Option<String>,
     on_event: Channel<R2ExtractEvent>,
 ) -> Result<(), String> {
+    let entry_file = entry_file.unwrap_or_else(|| "assetlookup.dat".to_string());
     let level_dir = Path::new(&usrdir)
         .join("packed")
         .join("levels")
@@ -215,17 +419,9 @@ pub fn r2_extract_level(
         });
         return Err(msg);
     }
-    let canonical_marker = level_dir
-        .join("built")
-        .join("levels")
-        .join(&map_id)
-        .join("assetlookup.dat");
-    let already_extracted = canonical_marker.is_file();
+    let already_extracted =
+        resolve_level_data_dir(&level_dir, &map_id, &entry_file).is_some();
 
-    // Scan the level dir for every `.psarc` file — no hardcoded name
-    // filter. Different V2 games / mods name their PSARCs differently
-    // (level_cached, level_uncached, level0, mp_dlc_pack, etc.) so we
-    // just extract them all.
     let mut psarcs: Vec<PathBuf> = std::fs::read_dir(&level_dir)
         .map_err(|e| format!("read_dir {}: {e}", level_dir.display()))?
         .flatten()
@@ -688,22 +884,48 @@ fn dir_mtime_recursive(path: &Path, max_depth: u32) -> Option<u64> {
 }
 
 #[tauri::command]
-pub fn r2_level_open_path(usrdir: String, map_id: String) -> Result<String, String> {
-    let candidate = Path::new(&usrdir)
+pub fn r2_level_open_path(
+    usrdir: String,
+    map_id: String,
+    entry_file: Option<String>,
+) -> Result<String, String> {
+    let entry_file = entry_file.unwrap_or_else(|| "assetlookup.dat".to_string());
+    let level_dir = Path::new(&usrdir)
         .join("packed")
         .join("levels")
-        .join(&map_id)
-        .join("built")
-        .join("levels")
         .join(&map_id);
-    if candidate.join("assetlookup.dat").is_file() {
-        Ok(candidate.to_string_lossy().into_owned())
-    } else {
-        Err(format!(
-            "level not extracted yet — no assetlookup.dat at {}",
-            candidate.display()
-        ))
+    match resolve_level_data_dir(&level_dir, &map_id, &entry_file) {
+        Some(dir) => Ok(dir.to_string_lossy().into_owned()),
+        None => Err(format!(
+            "level not extracted yet — no {} found under {} (checked V2 path {}/built/levels/{} and direct path {})",
+            entry_file,
+            level_dir.display(),
+            level_dir.display(),
+            map_id,
+            level_dir.display()
+        )),
     }
+}
+
+fn level_dir_is_extracted(level_dir: &Path) -> bool {
+    if level_dir.join("built").is_dir() {
+        return true;
+    }
+    if level_dir.join("ps3levelmain.dat").is_file() {
+        return true;
+    }
+    false
+}
+
+fn resolve_level_data_dir(level_dir: &Path, map_id: &str, entry_file: &str) -> Option<PathBuf> {
+    let v2 = level_dir.join("built").join("levels").join(map_id);
+    if v2.join(entry_file).is_file() {
+        return Some(v2);
+    }
+    if level_dir.join(entry_file).is_file() {
+        return Some(level_dir.to_path_buf());
+    }
+    None
 }
 
 fn extract_one_psarc(
