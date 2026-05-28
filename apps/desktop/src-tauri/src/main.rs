@@ -3150,15 +3150,69 @@ fn list_level_files(level_folder: String) -> Result<Vec<LevelFileDto>, String> {
     Ok(out)
 }
 
+/// Walk up from the current working directory (and the executable's
+/// directory) looking for a `.env` file. Loads the first one found via
+/// `dotenvy::from_path`. Returns the loaded path on success.
+///
+/// Why this exists: `dotenvy::dotenv()` only checks CWD. Tauri's dev
+/// command sets CWD to `apps/desktop/`, but our canonical `.env` is at
+/// the workspace root. Without walk-up, debug env vars never reach the
+/// decoders and `[skel-dump]` / `[anim-detail]` diagnostics silently
+/// vanish from logs.
+fn load_env_walking_up() -> Result<std::path::PathBuf, dotenvy::Error> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+    for start in roots {
+        let mut cursor: Option<&std::path::Path> = Some(start.as_path());
+        for _ in 0..12 {
+            let Some(dir) = cursor else { break };
+            let candidate = dir.join(".env");
+            if candidate.is_file() {
+                dotenvy::from_path(&candidate)?;
+                return Ok(candidate);
+            }
+            cursor = dir.parent();
+        }
+    }
+    Err(dotenvy::Error::Io(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        ".env not found in CWD or any parent directory",
+    )))
+}
+
 fn main() {
 
-    let dotenv_result = dotenvy::dotenv();
+    // Why: `dotenvy::dotenv()` only checks the current working directory,
+    // which under `bun run tauri dev` is `apps/desktop/` — NOT the workspace
+    // root where the canonical `.env` lives. Walk up from CWD (and from the
+    // executable's directory in prod builds) so debug env vars set in the
+    // workspace-root `.env` actually reach the lunalib decoders. Stops at
+    // the first hit so a per-app `.env` can still override.
+    let dotenv_result = load_env_walking_up();
 
 
     eprintln!("─── ReChimera startup ───");
-    match dotenv_result {
+    match &dotenv_result {
         Ok(path) => eprintln!("  .env loaded from: {}", path.display()),
         Err(_) => eprintln!("  .env: not found (using process environment only)"),
+    }
+    for var in [
+        "RECHIMERA_DEBUG_MOBY",
+        "RECHIMERA_LOG_ANIM_DETAIL",
+        "RECHIMERA_LOG_WEIGHTS",
+        "RECHIMERA_LOG_PROBES",
+        "RECHIMERA_LOG_SHADER_SLOTS",
+    ] {
+        if let Ok(val) = std::env::var(var) {
+            eprintln!("  {var}={val}");
+        }
     }
 
     eprintln!("─────────────────────────");
@@ -3222,6 +3276,7 @@ fn main() {
             r2::r2_setup_check,
             r2::r2_list_maps,
             r2::r2_extract_globals,
+            r2::r2_extract_patches,
             r2::r2_extract_root_psarcs,
             r2::r2_extract_level,
             r2::r2_level_open_path,

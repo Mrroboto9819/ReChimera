@@ -11,6 +11,7 @@ import {
   extractLevelToCache,
   r2CacheNeedsRebuild,
   r2ExtractGlobals,
+  r2ExtractPatches,
   r2ExtractRootPsarcs,
   r2ExtractLevel,
   r2ImportThumbnail,
@@ -31,7 +32,14 @@ import type {
   R2SetupStatus,
 } from "../api";
 
-type Phase = "usrdir" | "root_extract" | "globals" | "maps" | "level" | "prepare";
+type Phase =
+  | "usrdir"
+  | "root_extract"
+  | "globals"
+  | "patches"
+  | "maps"
+  | "level"
+  | "prepare";
 
 interface R2WizardProps {
   open: boolean;
@@ -471,6 +479,43 @@ export function R2Wizard({
     }
   }, [usrdir]);
 
+  const startPatches = useCallback(async () => {
+    if (!usrdir.trim()) return;
+    setPhase("patches");
+    setExtractBusy(true);
+    setExtractDone(false);
+    setExtract({ ...EMPTY_EXTRACT });
+    try {
+      await r2ExtractPatches(usrdir.trim(), (e: R2ExtractEvent) => {
+        applyExtractEvent(e, setExtract);
+        if (e.type === "psarc_done" && !e.skipped) {
+          globalsForceRebuildRef.current = true;
+        }
+        if (e.type === "done") {
+          setExtractBusy(false);
+          setExtractDone(true);
+        }
+      });
+      await refreshStatus(usrdir.trim());
+    } catch (e) {
+      setStatusError(String(e));
+      setExtractBusy(false);
+    }
+  }, [usrdir, refreshStatus]);
+
+  /** After the globals step (or any step that precedes maps), decide:
+   *  if `data/patch_*.psarc` files exist AND they haven't been extracted
+   *  yet, run the patches step. Otherwise go straight to maps. */
+  const continueAfterGlobals = useCallback(async () => {
+    const needsPatches =
+      (status?.patch_psarcs?.length ?? 0) > 0 && !status?.patches_extracted;
+    if (needsPatches) {
+      await startPatches();
+    } else {
+      await continueToMaps();
+    }
+  }, [status, startPatches, continueToMaps]);
+
   const prepareAndOpen = useCallback(
     async (mapId: string, path: string) => {
       let existingCache = false;
@@ -739,19 +784,34 @@ export function R2Wizard({
     }
   }, [phase, activeCategory, groupedMaps, selectedMapId]);
 
+  const patchesInChain =
+    (status?.patch_psarcs?.length ?? 0) > 0;
+  const stepLabels: readonly string[] = patchesInChain
+    ? (["USRDIR", "Globals", "Patches", "Map", "Level"] as const)
+    : (["USRDIR", "Globals", "Map", "Level"] as const);
+  const totalSteps = stepLabels.length;
   const stepIndex =
     phase === "usrdir"
       ? 1
-      : phase === "globals"
+      : phase === "globals" || phase === "root_extract"
         ? 2
-        : phase === "maps"
+        : phase === "patches"
           ? 3
-          : 4;
+          : phase === "maps"
+            ? patchesInChain ? 4 : 3
+            : patchesInChain ? 5 : 4;
+
+  const lockDismiss =
+    extractBusy ||
+    phase === "prepare" ||
+    busy ||
+    statusBusy;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
+      dismissable={!lockDismiss}
       size="xl"
       title={
         <span>
@@ -761,31 +821,35 @@ export function R2Wizard({
               ? "GAME ARCHIVE"
               : phase === "globals"
                 ? "GLOBALS"
-                : phase === "maps"
-                  ? `LEVELS : ${CATEGORY_LABEL[activeCategory].toUpperCase()}`
-                  : phase === "level"
-                    ? "EXTRACT"
-                    : "PREPARE"}
+                : phase === "patches"
+                  ? "DLC PATCHES"
+                  : phase === "maps"
+                    ? `LEVELS : ${CATEGORY_LABEL[activeCategory].toUpperCase()}`
+                    : phase === "level"
+                      ? "EXTRACT"
+                      : "PREPARE"}
           {" :"}
         </span>
       }
       subtitle={
         <span>
-          STEP {stepIndex} / 4 ·{" "}
+          STEP {stepIndex} / {totalSteps} ·{" "}
           {phase === "usrdir"
             ? "point to your USRDIR folder"
             : phase === "globals"
               ? "extracting shared globals"
-              : phase === "maps"
-                ? "pick a map"
-                : phase === "level"
-                  ? "extracting level data"
-                  : "preparing assets for render"}
+              : phase === "patches"
+                ? "extracting DLC overlay (mobys, textures, configs)"
+                : phase === "maps"
+                  ? "pick a map"
+                  : phase === "level"
+                    ? "extracting level data"
+                    : "preparing assets for render"}
         </span>
       }
       subheader={
         <ol className="wizard-stepbar" aria-label="Progress">
-          {(["USRDIR", "Globals", "Map", "Level"] as const).map((label, i) => {
+          {stepLabels.map((label, i) => {
             const n = i + 1;
             const active = stepIndex >= n;
             const done = stepIndex > n;
@@ -973,7 +1037,9 @@ export function R2Wizard({
         </div>
       )}
 
-      {(phase === "globals" || phase === "root_extract") && (
+      {(phase === "globals" ||
+        phase === "patches" ||
+        phase === "root_extract") && (
         <div className="r2-step">
           <ExtractProgressView state={extract} done={extractDone} busy={extractBusy} />
           {extractDone && extract.succeeded.length === 0 && (
@@ -991,6 +1057,8 @@ export function R2Wizard({
                   PSARC-readable state. Then point the wizard back at the
                   same USRDIR.
                 </>
+              ) : phase === "patches" ? (
+                `No DLC patches were extracted. Every patch_*.psarc failed — check the warning(s) below.`
               ) : (
                 `Nothing was extracted. Every global .psarc failed — check the warning(s) below.`
               )}
@@ -1008,7 +1076,19 @@ export function R2Wizard({
                 ? `Game archive extracted (${extract.succeeded.length} .psarc${
                     extract.succeeded.length === 1 ? "" : "s"
                   }). Continue to pick a map.`
-                : "Globals ready. Continue to pick a map."}
+                : phase === "patches"
+                  ? `DLC patches extracted (${extract.succeeded.length} archive${
+                      extract.succeeded.length === 1 ? "" : "s"
+                    }). Continue to pick a map.`
+                  : "Globals ready. Continue to pick a map."}
+            </div>
+          )}
+          {phase === "patches" && !extractBusy && !extractDone && (
+            <div className="dim small">
+              Found {status?.patch_psarcs?.length ?? 0} DLC patch
+              archive{(status?.patch_psarcs?.length ?? 0) === 1 ? "" : "s"} in{" "}
+              <code>data/</code>. These add the DLC bangle meshes (Rachel,
+              Grim, Malikov, Cloven, Ravager, …) plus new multiplayer maps.
             </div>
           )}
         </div>
@@ -1414,10 +1494,34 @@ export function R2Wizard({
       );
     }
     if (phase === "globals") {
+      const hasPendingPatches =
+        (status?.patch_psarcs?.length ?? 0) > 0 && !status?.patches_extracted;
       return (
         <>
           <Button
             onClick={() => setPhase("usrdir")}
+            disabled={extractBusy}
+          >
+            <ArrowLeft size={12} strokeWidth={2} /> Back
+          </Button>
+          <Button onClick={onClose} disabled={extractBusy}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => void continueAfterGlobals()}
+            disabled={!extractDone || busy}
+          >
+            {hasPendingPatches ? "Extract DLC patches →" : "Pick a map →"}
+          </Button>
+        </>
+      );
+    }
+    if (phase === "patches") {
+      return (
+        <>
+          <Button
+            onClick={() => setPhase("globals")}
             disabled={extractBusy}
           >
             <ArrowLeft size={12} strokeWidth={2} /> Back

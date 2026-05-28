@@ -28,6 +28,10 @@ impl OutfitterNames {
 pub fn find_configs_dir(assetlookup_path: &Path) -> Option<PathBuf> {
     let mut cursor = assetlookup_path.parent()?.to_path_buf();
     for _ in 0..10 {
+        let patch = cursor.join("data").join("configs");
+        if patch.is_dir() {
+            return Some(patch);
+        }
         let candidate = cursor
             .join("packed")
             .join("game")
@@ -116,6 +120,12 @@ fn friendly_name(unlock_id: &str, loc_tag: &str, category: &str, tuid: u64) -> S
         return sanitize(rest);
     }
     if let Some(rest) = loc_tag.strip_prefix("LOBBY_NAME_") {
+        return sanitize(rest);
+    }
+    if let Some(rest) = loc_tag.strip_prefix("LOBBY_TXT_SKIN") {
+        return sanitize(rest);
+    }
+    if let Some(rest) = loc_tag.strip_prefix("LOBBY_TXT_") {
         return sanitize(rest);
     }
     if loc_tag == "LOBBY_LABEL_HEAD" {

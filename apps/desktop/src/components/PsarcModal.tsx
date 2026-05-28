@@ -219,6 +219,7 @@ export function PsarcModal({ open, onClose }: PsarcModalProps) {
     <Modal
       open={open}
       onClose={onClose}
+      dismissable={!busy}
       title="Extract PSARC"
       subtitle="Pick a .psarc archive and a destination folder"
       size="lg"

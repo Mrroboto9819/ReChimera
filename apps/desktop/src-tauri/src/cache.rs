@@ -565,6 +565,7 @@ fn decode_clips_for_moby(
     position_scale: f32,
     scale_scale: f32,
     skel_bones: u16,
+    skel: Option<&lunalib::skeleton::Skeleton>,
 ) -> Vec<DecodedClip> {
     let Some(&(offset, length)) = index.by_hash.get(&animset_hash) else {
         return Vec::new();
@@ -678,7 +679,10 @@ fn decode_clips_for_moby(
         }
 
         match decode_animation(&mut ig, &header, &ctrl, position_scale, scale_scale) {
-            Ok(clip) => {
+            Ok(mut clip) => {
+                if let Some(s) = skel {
+                    clip.compose_additive_with_skeleton(s);
+                }
                 if debug_this {
                     let animated_rot = clip.bones.iter().filter(|b| b.rotation_animated).count();
                     let animated_pos = clip.bones.iter().filter(|b| b.translation_animated).count();
@@ -2138,6 +2142,54 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                 }
             }
 
+            // Patch overlay fallback. R2 PSN installs ship DLC content
+            // as `data/patch_NN.psarc`; `r2_extract_patches` unpacks them
+            // into `<usrdir>/built/patch/{textures,highmips,mobys,shaders,…}.dat`.
+            // That overlay carries the texture set for DLC characters
+            // (Rachel head, Female Soldier head, Grim/Ravager/Cloven body
+            // skins, blackops2/ranger2 variants) — a base-disc level can
+            // reference any of these IDs and only the overlay has the
+            // bytes. Treated as a fourth tier between globals and the
+            // sibling-level scan because the overlay is the authoritative
+            // DLC source (more specific than scrabbling through siblings).
+            let after_global: HashSet<u32> = r.iter().map(|(id, _)| *id).collect();
+            let still_missing_post_global: Vec<u32> = needed_ids
+                .iter()
+                .copied()
+                .filter(|id| !after_global.contains(id))
+                .collect();
+            if !still_missing_post_global.is_empty() {
+                if let Some(overlay) = lunalib::texture_global::find_patch_overlay(level_path) {
+                    match lunalib::bulk_extract_pngs(
+                        &overlay,
+                        Some(&still_missing_post_global),
+                        TEXTURE_MAX_DIM,
+                    ) {
+                        Ok(recovered) => {
+                            let n = recovered.len();
+                            for (id, png) in recovered {
+                                r.push((id, png));
+                            }
+                            if n > 0 {
+                                eprintln!(
+                                    "[patch-overlay-tex] recovered {} / {} missing textures from {}",
+                                    n,
+                                    still_missing_post_global.len(),
+                                    overlay.display(),
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[patch-overlay-tex] overlay {} failed: {}",
+                                overlay.display(),
+                                e,
+                            );
+                        }
+                    }
+                }
+            }
+
             // Cross-level fallback. R2 shares art (lobby UI, coop/MP
             // overlays, weapon variants) across level PSARCs, not the
             // globals — so meshes in this level can reference IDs whose
@@ -2412,6 +2464,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                         pos_scale,
                         scale_scale,
                         sb,
+                        asset.skeleton.as_ref(),
                     )
                 }
                 _ => Vec::new(),
@@ -2980,6 +3033,7 @@ pub fn export_moby_glb_with_options(
                 pos_scale,
                 scale_scale,
                 sb,
+                asset.skeleton.as_ref(),
             ));
         }
 
@@ -3031,6 +3085,7 @@ pub fn export_moby_glb_with_options(
                     pos_scale,
                     scale_scale,
                     sb,
+                    asset.skeleton.as_ref(),
                 );
                 if pick.clip_indices.is_empty() {
                     clips.extend(extras);
@@ -3430,6 +3485,7 @@ fn try_load_skinned_moby_for_level(
                 pos_scale,
                 scale_scale,
                 sb,
+                asset.skeleton.as_ref(),
             ));
         }
     }

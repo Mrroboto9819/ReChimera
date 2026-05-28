@@ -1566,6 +1566,23 @@ export function App() {
           setCacheModalInitialTextureId(null);
           setCacheModalInitialSoundKey(null);
         }}
+        onSwitchMap={() => {
+          setCacheLibraryOpen(false);
+          setPreviewAssetTuid(null);
+          setCacheModalInitialPanel(null);
+          setCacheModalInitialTextureId(null);
+          setCacheModalInitialSoundKey(null);
+          setOpenLevelModalOpen(true);
+        }}
+        onCloseGame={() => {
+          setCacheLibraryOpen(false);
+          setPreviewAssetTuid(null);
+          setCacheModalInitialPanel(null);
+          setCacheModalInitialTextureId(null);
+          setCacheModalInitialSoundKey(null);
+          handleClose();
+          setOpenLevelModalOpen(true);
+        }}
         onOpenInWorkbench={(tuid, kind) => {
           openInWorkbench(tuid, kind);
           setCacheLibraryOpen(false);

@@ -1244,6 +1244,15 @@ export interface R2SetupStatus {
    *  Distinguishes "USRDIR has level folders but they're just dialogue
    *  streams" (RFOM pre-extract) from "USRDIR is fully unpacked". */
   any_level_built: boolean;
+  /** `data/patch_NN.psarc` DLC content archives discovered in this USRDIR.
+   *  Each name is a basename like `patch_01.psarc`. Empty for non-PSN
+   *  installs and for non-V2 games. */
+  patch_psarcs: string[];
+  /** True when every entry in `patch_psarcs` has its
+   *  `data/.<stem>.extracted` sentinel written. The R2 wizard runs the
+   *  patch step automatically when this is false and `patch_psarcs`
+   *  is non-empty. */
+  patches_extracted: boolean;
 }
 
 export type R2MapCategory = "campaign" | "multiplayer" | "coop" | "lobby" | "other";
@@ -1277,6 +1286,24 @@ export function r2ExtractGlobals(
   const ch = new Channel<R2ExtractEvent>();
   ch.onmessage = onEvent;
   return invoke<void>("r2_extract_globals", { usrdir, onEvent: ch });
+}
+
+/** Extract every `data/patch_NN.psarc` (DLC content) into the USRDIR. After
+ *  this completes, DLC MP maps appear in `r2ListMaps()` output (e.g.
+ *  `lumber_yard_multiplayer`, `twin_falls_multiplayer`), the DLC overlay
+ *  is aliased as a `dlc_overlay` level, and the patched
+ *  `data/configs/comp_outfitter.csv` (containing Rachel / Grim / Malikov /
+ *  Cloven / Ravager / Ranger2 / Blackops2 / FemaleSoldier / etc. bangle
+ *  rows) is in place for the outfitter-name parser. Idempotent — re-runs
+ *  skip patches that already wrote their `data/.<stem>.extracted`
+ *  sentinel. No-op when no `data/patch_*.psarc` files exist. */
+export function r2ExtractPatches(
+  usrdir: string,
+  onEvent: (e: R2ExtractEvent) => void,
+): Promise<void> {
+  const ch = new Channel<R2ExtractEvent>();
+  ch.onmessage = onEvent;
+  return invoke<void>("r2_extract_patches", { usrdir, onEvent: ch });
 }
 
 /** Pre-extract step for RFOM — unpacks any `.psarc` sitting at the

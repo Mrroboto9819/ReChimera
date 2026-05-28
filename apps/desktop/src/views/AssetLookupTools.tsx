@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   assetLookupExtractStream,
@@ -31,7 +31,13 @@ const ALL_KIND_ORDER = [
 
 const DEFAULT_SELECTED = new Set<string>(["texture", "moby", "tie"]);
 
-export function AssetLookupTools() {
+interface AssetLookupToolsProps {
+  /** Notifies the host (modal) when extraction starts or ends so the modal
+   *  can lock backdrop-dismissal while work is in progress. */
+  onBusyChange?: (busy: boolean) => void;
+}
+
+export function AssetLookupTools({ onBusyChange }: AssetLookupToolsProps = {}) {
   const [inputPath, setInputPath] = useState("");
   const [outputPath, setOutputPath] = useState("");
   const [overview, setOverview] = useState<AssetLookupOverviewDto | null>(null);
@@ -39,6 +45,9 @@ export function AssetLookupTools() {
     new Set(DEFAULT_SELECTED),
   );
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<Map<string, KindProgress>>(
     new Map(),

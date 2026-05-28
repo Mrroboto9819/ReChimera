@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Modal } from "./Modal";
 import { Button } from "../ui";
 import { AssetLookupTools } from "../views/AssetLookupTools";
@@ -8,18 +9,22 @@ interface AssetLookupModalProps {
 }
 
 export function AssetLookupModal({ open, onClose }: AssetLookupModalProps) {
+  const [busy, setBusy] = useState(false);
   return (
     <Modal
       open={open}
       onClose={onClose}
+      dismissable={!busy}
       title="Extract asset lookup"
       subtitle="Decode mobys, ties, textures, shaders and more directly from a V2 (R2 / R3 / RCFFA) assetlookup.dat"
       size="lg"
       footer={
-        <Button onClick={onClose}>Close</Button>
+        <Button onClick={onClose} disabled={busy}>
+          Close
+        </Button>
       }
     >
-      <AssetLookupTools />
+      <AssetLookupTools onBusyChange={setBusy} />
     </Modal>
   );
 }
