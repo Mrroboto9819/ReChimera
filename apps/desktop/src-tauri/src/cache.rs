@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lunalib::{
-    animation_section_offsets, decode_animation, decode_animation_with_skeleton, detect_layout,
+    animation_section_offsets, decode_animation, decode_animation_with_skel,
+    decode_animation_with_skeleton, detect_layout,
     read_animation_control, read_animation_header_at,
     read_moby_assets_with_total, read_shaders, read_tie_assets_with_total, read_zones, AssetKind,
     AssetLookup, DecodedClip, IgFile, LevelLayout, ShaderInfo, Skeleton, UFrag, Zone,
@@ -678,9 +679,12 @@ fn decode_clips_for_moby(
             }
         }
 
-        match decode_animation(&mut ig, &header, &ctrl, position_scale, scale_scale) {
+        let decode_result = match skel {
+            Some(s) => decode_animation_with_skel(&mut ig, &header, &ctrl, position_scale, scale_scale, s),
+            None => decode_animation(&mut ig, &header, &ctrl, position_scale, scale_scale),
+        };
+        match decode_result {
             Ok(clip) => {
-                let _ = skel;
                 if debug_this {
                     let animated_rot = clip.bones.iter().filter(|b| b.rotation_animated).count();
                     let animated_pos = clip.bones.iter().filter(|b| b.translation_animated).count();
@@ -4175,7 +4179,7 @@ pub fn decode_animset_clip(
     let ctrl =
         read_animation_control(&mut ig, &header).map_err(|e| format!("control: {e}"))?;
 
-    let clip = decode_animation(&mut ig, &header, &ctrl, pos_scale, scale_scale)
+    let clip = decode_animation_with_skel(&mut ig, &header, &ctrl, pos_scale, scale_scale, &skeleton)
         .map_err(|e| format!("decode: {e}"))?;
 
     Ok(DecodedClipDto {

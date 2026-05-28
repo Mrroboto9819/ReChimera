@@ -489,7 +489,22 @@ pub fn decode_animation<R: Read + Seek>(
     position_scale: f32,
     scale_scale: f32,
 ) -> Result<DecodedClip> {
-    decode_animation_with_skel_bones(ig, h, ctrl, position_scale, scale_scale, None)
+    decode_animation_with_skel_bones(ig, h, ctrl, position_scale, scale_scale, None, None)
+}
+
+/// Convenience wrapper used by the V2 cache path: passes the skeleton so the
+/// decoder can fall back to the bone's bind translation/scale for any channel
+/// component the clip doesn't touch (mirrors what IT's `gltf_shared.cpp` does
+/// for partial-component animation tracks).
+pub fn decode_animation_with_skel<R: Read + Seek>(
+    ig: &mut IgFile<R>,
+    h: &AnimationHeader,
+    ctrl: &AnimationControl,
+    position_scale: f32,
+    scale_scale: f32,
+    skel: &Skeleton,
+) -> Result<DecodedClip> {
+    decode_animation_with_skel_bones(ig, h, ctrl, position_scale, scale_scale, None, Some(skel))
 }
 
 /// Same as `decode_animation` but lets the caller override the bone count when
@@ -507,7 +522,15 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
     position_scale: f32,
     scale_scale: f32,
     override_num_bones: Option<u16>,
+    skel: Option<&Skeleton>,
 ) -> Result<DecodedClip> {
+    let (ref_trans, ref_scale) = match skel {
+        Some(s) => {
+            let (rt, rs) = decompose_skeleton_ref_pose(s);
+            (Some(rt), Some(rs))
+        }
+        None => (None, None),
+    };
     let nb = override_num_bones
         .map(|n| n as usize)
         .unwrap_or(h.num_bones as usize);
@@ -707,7 +730,7 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 .copied()
                 .unwrap_or(0) as i32;
 
-            let value = (base + delta).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            let value = (base as i16).wrapping_add(delta as i16);
             let b = m.bone_index as usize;
             if b >= nb {
                 continue;
@@ -754,22 +777,35 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
             q.to_vec()
         };
 
+        let rt_fallback = ref_trans.as_ref().and_then(|v| v.get(b).copied()).unwrap_or([0.0; 3]);
+        let rs_fallback = ref_scale.as_ref().and_then(|v| v.get(b).copied()).unwrap_or([1.0; 3]);
+
         let translations = if pos_animated[b] {
             let mut out = Vec::with_capacity(nf * 3);
             for f in 0..nf {
                 let raw = pos_values[b * nf + f];
-                out.push(raw[0] as f32 * position_scale);
-                out.push(raw[1] as f32 * position_scale);
-                out.push(raw[2] as f32 * position_scale);
+                let mask = pos_set[b * nf + f];
+                for c in 0..3 {
+                    if mask & (1 << c) != 0 {
+                        out.push(raw[c] as f32 * position_scale);
+                    } else {
+                        out.push(rt_fallback[c]);
+                    }
+                }
             }
             out
         } else if pos_static_set[b] != 0 {
             let raw = pos_static_value[b];
-            vec![
-                raw[0] as f32 * position_scale,
-                raw[1] as f32 * position_scale,
-                raw[2] as f32 * position_scale,
-            ]
+            let mask = pos_static_set[b];
+            let mut out = Vec::with_capacity(3);
+            for c in 0..3 {
+                if mask & (1 << c) != 0 {
+                    out.push(raw[c] as f32 * position_scale);
+                } else {
+                    out.push(rt_fallback[c]);
+                }
+            }
+            out
         } else {
             Vec::new()
         };
@@ -778,18 +814,28 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
             let mut out = Vec::with_capacity(nf * 3);
             for f in 0..nf {
                 let raw = scl_values[b * nf + f];
-                out.push(raw[0] as f32 * scale_scale);
-                out.push(raw[1] as f32 * scale_scale);
-                out.push(raw[2] as f32 * scale_scale);
+                let mask = scl_set[b * nf + f];
+                for c in 0..3 {
+                    if mask & (1 << c) != 0 {
+                        out.push(raw[c] as f32 * scale_scale);
+                    } else {
+                        out.push(rs_fallback[c]);
+                    }
+                }
             }
             out
         } else if scl_static_set[b] != 0 {
             let raw = scl_static_value[b];
-            vec![
-                raw[0] as f32 * scale_scale,
-                raw[1] as f32 * scale_scale,
-                raw[2] as f32 * scale_scale,
-            ]
+            let mask = scl_static_set[b];
+            let mut out = Vec::with_capacity(3);
+            for c in 0..3 {
+                if mask & (1 << c) != 0 {
+                    out.push(raw[c] as f32 * scale_scale);
+                } else {
+                    out.push(rs_fallback[c]);
+                }
+            }
+            out
         } else {
             Vec::new()
         };
@@ -987,7 +1033,7 @@ pub fn decode_animation_with_skeleton<R: Read + Seek>(
                 None => continue,
             };
             let base = ctrl.track8_base_values.get(i).copied().unwrap_or(0) as i32;
-            let value = (base + delta).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            let value = (base as i16).wrapping_add(delta as i16);
             let b = m.bone_index as usize;
             if b >= nb {
                 continue;
