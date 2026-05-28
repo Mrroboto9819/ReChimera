@@ -49,6 +49,7 @@
     "openLevel": "Открыть уровень…",
     "closeLevel": "Закрыть уровень",
     "extractPsarc": "Извлечь PSARC…",
+    "extractAssetLookup": "Извлечь asset lookup…",
     "view": "Вид",
     "grid": "Сетка",
     "axes": "Оси",

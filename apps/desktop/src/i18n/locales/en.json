@@ -62,6 +62,7 @@
     "openLevel": "Open Level…",
     "closeLevel": "Close Level",
     "extractPsarc": "Extract PSARC…",
+    "extractAssetLookup": "Extract asset lookup…",
     "view": "View",
     "grid": "Grid",
     "axes": "Axes",

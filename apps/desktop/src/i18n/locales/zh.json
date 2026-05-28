@@ -49,6 +49,7 @@
     "openLevel": "打开关卡…",
     "closeLevel": "关闭关卡",
     "extractPsarc": "提取 PSARC…",
+    "extractAssetLookup": "提取资产查找表…",
     "view": "视图",
     "grid": "网格",
     "axes": "坐标轴",

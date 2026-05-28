@@ -62,6 +62,7 @@ import { Menu, MenuBar, MenuCheckItem, MenuItem, MenuSpacer } from "./views/Menu
 import { Modal } from "./components/Modal";
 import { OpenLevelModal } from "./components/OpenLevelModal";
 import { PsarcModal } from "./components/PsarcModal";
+import { AssetLookupModal } from "./components/AssetLookupModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { TabContainer } from "./views/TabContainer";
 import { useApplySettings } from "./useApplySettings";
@@ -241,6 +242,7 @@ export function App() {
   const [docsModalOpen, setDocsModalOpen] = useState(false);
   const [openLevelModalOpen, setOpenLevelModalOpen] = useState(false);
   const [psarcModalOpen, setPsarcModalOpen] = useState(false);
+  const [assetLookupModalOpen, setAssetLookupModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [exportState, setExportState] = useState<ExportProgressState | null>(null);
   
@@ -1294,6 +1296,9 @@ export function App() {
             <MenuItem onSelect={() => setPsarcModalOpen(true)}>
               {t("menu.extractPsarc")}
             </MenuItem>
+            <MenuItem onSelect={() => setAssetLookupModalOpen(true)}>
+              {t("menu.extractAssetLookup")}
+            </MenuItem>
             <MenuItem onSelect={() => handleBrowseGltfFolder()}>
               Browse GLTF folder…
             </MenuItem>
@@ -1534,6 +1539,11 @@ export function App() {
       <PsarcModal
         open={psarcModalOpen}
         onClose={() => setPsarcModalOpen(false)}
+      />
+
+      <AssetLookupModal
+        open={assetLookupModalOpen}
+        onClose={() => setAssetLookupModalOpen(false)}
       />
 
       <SettingsModal

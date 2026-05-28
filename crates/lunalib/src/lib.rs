@@ -2,8 +2,10 @@
 
 
 pub mod animation;
+pub mod asset_lookup_extract;
 pub mod assetlookup;
 pub mod cubemap;
+pub mod outfitter_names;
 pub mod error;
 pub mod dds;
 pub mod detail_rfom;
@@ -57,7 +59,16 @@ pub use animation::{
     read_animation_header, read_animation_header_at, AnimationControl, AnimationHeader,
     DecodedBone, DecodedClip, TrackKind, TrackMask,
 };
+pub use asset_lookup_extract::{
+    extract_assetlookup, inspect_assetlookup, AssetLookupOverview, ExtractEvent, ExtractOptions,
+    KindOverview,
+};
 pub use assetlookup::{AssetKind, AssetLookup, AssetPointer};
+pub use outfitter_names::{
+    find_configs_dir as find_outfitter_configs_dir,
+    load_from_assetlookup as load_outfitter_names_from_assetlookup,
+    load_from_configs_dir as load_outfitter_names_from_configs_dir, OutfitterNames,
+};
 pub use error::{Error, Result};
 pub use fbx_binary_export::{
     write_animated_level_fbx_binary as write_animated_level_fbx,

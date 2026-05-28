@@ -155,6 +155,7 @@ pub fn append_moby_to_doc(
                 &mut doc.buffer_views,
                 mesh,
                 skin_idx.is_some(),
+                bone_count,
                 material_idx,
             )? {
                 if prim
@@ -462,6 +463,7 @@ fn push_submesh(
     views: &mut Vec<gltf_json::buffer::View>,
     mesh: &MobyMesh,
     skinned: bool,
+    bone_count: usize,
     material_idx: Option<u32>,
 ) -> Result<Option<Primitive>> {
     use std::collections::BTreeMap;
@@ -543,7 +545,7 @@ fn push_submesh(
         }
 
         let joints_bytes = if real_skin {
-            joints_u8_bytes(&mesh.bone_indices, vertex_count)
+            joints_u8_bytes(&mesh.bone_indices, vertex_count, bone_count)
         } else {
             vec![0u8; vertex_count * 4]
         };
@@ -799,13 +801,31 @@ fn indices_to_bytes(indices: &[u32]) -> Vec<u8> {
     out
 }
 
-fn joints_u8_bytes(indices: &[u16], vertex_count: usize) -> Vec<u8> {
+fn joints_u8_bytes(indices: &[u16], vertex_count: usize, bone_count: usize) -> Vec<u8> {
+    let max_bone = if bone_count == 0 {
+        0
+    } else {
+        (bone_count - 1).min(255) as u16
+    };
     let mut out = Vec::with_capacity(vertex_count * 4);
+    let mut oob = 0usize;
     for i in 0..vertex_count {
         for k in 0..4 {
             let v = indices.get(i * 4 + k).copied().unwrap_or(0);
-            out.push(v.min(255) as u8);
+            if v > max_bone {
+                oob += 1;
+                out.push(max_bone as u8);
+            } else {
+                out.push(v as u8);
+            }
         }
+    }
+    if oob > 0 && std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
+        eprintln!(
+            "warn: [glb-skin] clamped {} joint indices >= bone_count ({}) to {}; \
+             likely missing per-bangle bone remap or wrong sub-skeleton",
+            oob, bone_count, max_bone,
+        );
     }
     out
 }
