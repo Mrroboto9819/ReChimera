@@ -5607,6 +5607,31 @@ textarea {
   width: 100%;
   height: 100%;
 }
+.glb-preview-overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+  background: rgba(7, 8, 10, 0.7);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--text-2);
+  max-width: calc(100% - 16px);
+  pointer-events: none;
+}
+.glb-preview-overlay-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glb-preview-overlay-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .glb-preview-burger {
   position: relative;
   display: inline-flex;
@@ -9117,6 +9142,29 @@ textarea {
 }
 .aw-export-wrap .btn {
   backdrop-filter: blur(6px);
+}
+.aw-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-2);
+  max-width: 360px;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+.aw-overlay-model,
+.aw-overlay-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes r2BusyPulse {

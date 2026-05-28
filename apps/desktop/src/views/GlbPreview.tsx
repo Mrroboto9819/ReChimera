@@ -24,6 +24,8 @@ interface GlbPreviewProps {
   folder: string;
   assetTuidHex: string;
   kind: "moby" | "tie";
+  assetName?: string;
+  showOverlay?: boolean;
   exportPicks?: ExportPicks;
   onExportPicksChange?: (picks: ExportPicks) => void;
 }
@@ -96,6 +98,8 @@ export function GlbPreview({
   folder,
   assetTuidHex,
   kind,
+  assetName,
+  showOverlay,
   exportPicks,
   onExportPicksChange,
 }: GlbPreviewProps) {
@@ -528,6 +532,17 @@ export function GlbPreview({
             dampingFactor={0.1}
           />
         </Canvas>
+
+        {showOverlay && (
+          <div className="glb-preview-overlay mono small">
+            <span className="glb-preview-overlay-model">
+              {assetName ?? assetTuidHex}
+            </span>
+            <span className="glb-preview-overlay-clip dim">
+              {activeClip ? activeClip.name : "rest pose"}
+            </span>
+          </div>
+        )}
 
         {menuOpen && (
           <aside className="glb-preview-menu">

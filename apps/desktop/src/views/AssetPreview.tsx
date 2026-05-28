@@ -16,6 +16,7 @@ interface AssetPreviewProps {
   meshes: LevelMeshes | null;
   textureBlobs: TextureBlobMap | null;
   cacheFolder?: string;
+  showOverlay?: boolean;
   exportPicks?: ExportPicks;
   onExportPicksChange?: (picks: ExportPicks) => void;
 }
@@ -25,6 +26,7 @@ export function AssetPreview({
   meshes,
   textureBlobs,
   cacheFolder,
+  showOverlay,
   exportPicks,
   onExportPicksChange,
 }: AssetPreviewProps) {
@@ -43,6 +45,8 @@ export function AssetPreview({
           folder={cacheFolder}
           assetTuidHex={instance.asset_tuid.split("#")[0]!}
           kind={instance.kind}
+          assetName={instance.name}
+          showOverlay={showOverlay}
           exportPicks={exportPicks}
           onExportPicksChange={onExportPicksChange}
         />

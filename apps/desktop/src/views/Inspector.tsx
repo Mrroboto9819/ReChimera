@@ -193,6 +193,7 @@ export function Inspector({
             meshes={meshes}
             textureBlobs={textureBlobs}
             cacheFolder={cacheFolder ?? undefined}
+            showOverlay
           />
         </div>
 

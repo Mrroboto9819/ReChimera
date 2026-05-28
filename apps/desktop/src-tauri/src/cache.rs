@@ -679,10 +679,8 @@ fn decode_clips_for_moby(
         }
 
         match decode_animation(&mut ig, &header, &ctrl, position_scale, scale_scale) {
-            Ok(mut clip) => {
-                if let Some(s) = skel {
-                    clip.compose_additive_with_skeleton(s);
-                }
+            Ok(clip) => {
+                let _ = skel;
                 if debug_this {
                     let animated_rot = clip.bones.iter().filter(|b| b.rotation_animated).count();
                     let animated_pos = clip.bones.iter().filter(|b| b.translation_animated).count();

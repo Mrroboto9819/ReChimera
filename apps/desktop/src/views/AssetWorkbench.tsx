@@ -548,6 +548,15 @@ export function AssetWorkbench({
           <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
         </Canvas>
 
+        <div className="aw-overlay mono small">
+          <span className="aw-overlay-model">
+            {instance?.name ?? assetTuidHex}
+          </span>
+          <span className="aw-overlay-clip dim">
+            {activeClip ? activeClip.name : "rest pose"}
+          </span>
+        </div>
+
         <div className="aw-export-wrap">
           <Button
             variant="primary"

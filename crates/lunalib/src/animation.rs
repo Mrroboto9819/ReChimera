@@ -331,6 +331,7 @@ impl DecodedClip {
         if !self.additive {
             return;
         }
+        let probe = std::env::var("RECHIMERA_LOG_ANIM_DETAIL").is_ok();
         let (ref_trans, ref_scale) = decompose_skeleton_ref_pose(skel);
         let nf = self.num_frames as usize;
         for (b, bone) in self.bones.iter_mut().enumerate() {
@@ -345,6 +346,23 @@ impl DecodedClip {
                     Some(extract_bind_rotation(&bl))
                 })
                 .unwrap_or([0.0, 0.0, 0.0, 1.0]);
+            if probe && b < 6 && !bone.rotations.is_empty() && bone.rotation_animated {
+                let dx = bone.rotations[0];
+                let dy = bone.rotations[1];
+                let dz = bone.rotations[2];
+                let dw = bone.rotations[3];
+                let dot_id = dw;
+                let dot_bind = bq[0] * dx + bq[1] * dy + bq[2] * dz + bq[3] * dw;
+                eprintln!(
+                    "[add-probe] clip='{}' bone={} decoded=({:.3},{:.3},{:.3},{:.3}) \
+                     bind=({:.3},{:.3},{:.3},{:.3}) dot_identity={:.3} dot_bind={:.3} \
+                     {}",
+                    self.name, b, dx, dy, dz, dw,
+                    bq[0], bq[1], bq[2], bq[3],
+                    dot_id.abs(), dot_bind.abs(),
+                    if dot_id.abs() > dot_bind.abs() { "~IDENTITY" } else { "~BIND" }
+                );
+            }
             if !bone.translations.is_empty() {
                 let n = bone.translations.len() / 3;
                 for f in 0..n {
@@ -560,20 +578,27 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
             continue;
         }
         let c = m.component as usize;
-        if c >= 3 {
-            continue;
-        }
         match m.kind {
+            TrackKind::Rotation => {
+                if c < 4 {
+                    for f in 0..nf {
+                        rot_values[b * nf + f][c] = v;
+                    }
+                }
+            }
             TrackKind::Position => {
-                pos_static_value[b][c] = v;
-                pos_static_set[b] |= 1 << c;
+                if c < 3 {
+                    pos_static_value[b][c] = v;
+                    pos_static_set[b] |= 1 << c;
+                }
             }
             TrackKind::Scale => {
-                scl_static_value[b][c] = v;
-                scl_static_set[b] |= 1 << c;
+                if c < 3 {
+                    scl_static_value[b][c] = v;
+                    scl_static_set[b] |= 1 << c;
+                }
             }
-
-            TrackKind::Rotation | TrackKind::Unknown => {}
+            TrackKind::Unknown => {}
         }
     }
 
