@@ -93,6 +93,16 @@ impl AnimationHeader {
     pub const fn is_packed_frames(&self) -> bool {
         self.flags & 0x04 != 0
     }
+    /// Flag bit 0x0200 (R3 split upper/lower face rigs). When set, the clip's
+    /// position and scale tracks are DELTAS from the bone's bind pose, not
+    /// absolute values: final = bind_translation + delta, bind_scale + delta.
+    /// Confirmed via John Harper head probe: `exp_*_lower` clips (0x0206) decode
+    /// pos≈0 / scale≈0, while `head_visemes` (0x0007, no 0x200) decodes
+    /// pos≈bind / scale≈1.0. IT's enum doesn't name this bit and its decoder
+    /// ignores it, so this is RE'd from our own data.
+    pub const fn is_delta_pos_scale(&self) -> bool {
+        self.flags & 0x0200 != 0
+    }
 
     /// Mirror IT's `FByteswapper<Animation>` (serialize.cpp:660): non-packed
     /// clips have their on-disk `frameStride` rounded UP to a 128-byte
@@ -763,9 +773,12 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
         }
     }
 
+    let additive = h.is_additive();
+    let delta_ps = h.is_delta_pos_scale();
     let mut bones = Vec::with_capacity(nb);
     for b in 0..nb {
 
+        let blend_mask = ctrl.blend_masks.get(b).copied().unwrap_or(1);
         let rotations = if rot_animated[b] {
             let mut out = Vec::with_capacity(nf * 4);
             for f in 0..nf {
@@ -773,8 +786,14 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 out.extend_from_slice(&q);
             }
             out
+        } else if additive && blend_mask == 0 {
+            // IT gltf_shared.cpp:282 — for additive clips, a bone outside
+            // this blend layer (blend_mask == 0) gets NO rotation channel.
+            // Its ref_pose_rotations entry is stale/garbage for bones the
+            // layer doesn't touch, so emitting it would rotate a bone that
+            // should stay at bind (the split upper/lower face-rig bug).
+            Vec::new()
         } else {
-
             let q = dequantize_quaternion(
                 ctrl.ref_pose_rotations.get(b).copied().unwrap_or([0, 0, 0, 32767]),
             );
@@ -784,6 +803,12 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
         let rt_fallback = ref_trans.as_ref().and_then(|v| v.get(b).copied()).unwrap_or([0.0; 3]);
         let rs_fallback = ref_scale.as_ref().and_then(|v| v.get(b).copied()).unwrap_or([1.0; 3]);
 
+        // For 0x200 (delta) clips the animated component is a delta from the
+        // bone's bind value: final = bind + decoded. For absolute clips the
+        // decoded value is used directly.
+        let pos_bias = |c: usize| if delta_ps { rt_fallback[c] } else { 0.0 };
+        let scl_bias = |c: usize| if delta_ps { rs_fallback[c] } else { 0.0 };
+
         let translations = if pos_animated[b] {
             let mut out = Vec::with_capacity(nf * 3);
             for f in 0..nf {
@@ -791,7 +816,7 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 let mask = pos_set[b * nf + f];
                 for c in 0..3 {
                     if mask & (1 << c) != 0 {
-                        out.push(raw[c] as f32 * position_scale);
+                        out.push(raw[c] as f32 * position_scale + pos_bias(c));
                     } else {
                         out.push(rt_fallback[c]);
                     }
@@ -804,7 +829,7 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
             let mut out = Vec::with_capacity(3);
             for c in 0..3 {
                 if mask & (1 << c) != 0 {
-                    out.push(raw[c] as f32 * position_scale);
+                    out.push(raw[c] as f32 * position_scale + pos_bias(c));
                 } else {
                     out.push(rt_fallback[c]);
                 }
@@ -821,7 +846,7 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 let mask = scl_set[b * nf + f];
                 for c in 0..3 {
                     if mask & (1 << c) != 0 {
-                        out.push(raw[c] as f32 * scale_scale);
+                        out.push(raw[c] as f32 * scale_scale + scl_bias(c));
                     } else {
                         out.push(rs_fallback[c]);
                     }
@@ -834,7 +859,7 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
             let mut out = Vec::with_capacity(3);
             for c in 0..3 {
                 if mask & (1 << c) != 0 {
-                    out.push(raw[c] as f32 * scale_scale);
+                    out.push(raw[c] as f32 * scale_scale + scl_bias(c));
                 } else {
                     out.push(rs_fallback[c]);
                 }
@@ -852,6 +877,51 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
             translation_animated: pos_animated[b],
             scale_animated: scl_animated[b],
         });
+    }
+
+    if std::env::var("RECHIMERA_LOG_ANIM_DETAIL").is_ok() && additive {
+        let mut shown = 0;
+        for (b, bone) in bones.iter().enumerate() {
+            if shown >= 8 {
+                break;
+            }
+            let pos_anim = bone.translation_animated && bone.translations.len() >= 3;
+            let scl_anim = bone.scale_animated && bone.scales.len() >= 3;
+            if !pos_anim && !scl_anim {
+                continue;
+            }
+            let bt = ref_trans.as_ref().and_then(|v| v.get(b).copied()).unwrap_or([0.0; 3]);
+            let p0 = if pos_anim {
+                [bone.translations[0], bone.translations[1], bone.translations[2]]
+            } else { [f32::NAN; 3] };
+            let s0 = if scl_anim {
+                [bone.scales[0], bone.scales[1], bone.scales[2]]
+            } else { [f32::NAN; 3] };
+            // Rotation: is the decoded frame-0 quat closer to identity (delta)
+            // or to bind (absolute)? Tells us whether 0x200 also makes rotation
+            // a delta from bind.
+            let (rdesc, dot_id, dot_bind) = if bone.rotation_animated && bone.rotations.len() >= 4 {
+                let q = [bone.rotations[0], bone.rotations[1], bone.rotations[2], bone.rotations[3]];
+                let bq = skel
+                    .and_then(|s| s.bind_local.get(b).copied())
+                    .map(|bl| extract_bind_rotation(&bl))
+                    .unwrap_or([0.0, 0.0, 0.0, 1.0]);
+                let di = q[3].abs();
+                let db = (bq[0] * q[0] + bq[1] * q[1] + bq[2] * q[2] + bq[3] * q[3]).abs();
+                let tag = if di > db { "~IDENTITY(delta)" } else { "~BIND(abs)" };
+                (tag, di, db)
+            } else {
+                ("none", f32::NAN, f32::NAN)
+            };
+            eprintln!(
+                "[pos-probe] clip='{}' bone={} pos0=({:.4},{:.4},{:.4}) bindT=({:.4},{:.4},{:.4}) \
+                 scl0=({:.3},{:.3},{:.3}) rot={} dotId={:.3} dotBind={:.3}",
+                h.name, b,
+                p0[0], p0[1], p0[2], bt[0], bt[1], bt[2],
+                s0[0], s0[1], s0[2], rdesc, dot_id, dot_bind,
+            );
+            shown += 1;
+        }
     }
 
     Ok(DecodedClip {

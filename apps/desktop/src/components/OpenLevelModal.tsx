@@ -17,7 +17,7 @@ interface OpenLevelModalProps {
   open: boolean;
   busy: boolean;
   onClose: () => void;
-  onOpen: (folderPath: string, opts?: { skipCachePrompt?: boolean }) => void;
+  onOpen: (folderPath: string, opts?: { skipCachePrompt?: boolean; game?: string }) => void;
 }
 
 type GameId = "r1" | "r2" | "r3" | "rc_tod" | "rc_acit" | "rc_ffa" | "rc_a4o";
@@ -417,7 +417,7 @@ export function OpenLevelModal({
       if (game) {
         pushRecent(game, trimmed);
       }
-      onOpen(trimmed);
+      onOpen(trimmed, { game: GAMES.find((g) => g.id === game)?.short });
     },
     [onOpen, game],
   );
@@ -661,7 +661,7 @@ export function OpenLevelModal({
         }}
         onOpen={(folder, opts) => {
           pushRecent(game, folder);
-          onOpen(folder, opts);
+          onOpen(folder, { ...opts, game: wizardLabel });
         }}
       />
     );

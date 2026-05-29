@@ -172,6 +172,7 @@ export function App() {
   }, [layout.inspectorHidden]);
 
   const [summary, setSummary] = useState<LevelSummary | null>(null);
+  const [openedGame, setOpenedGame] = useState<string | null>(null);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [ufrags, setUFrags] = useState<UFragBounds[]>([]);
   const [meshes, setMeshes] = useState<LevelMeshes | null>(null);
@@ -802,9 +803,10 @@ export function App() {
   );
 
 
-  const handleOpen = useCallback(async (rawFolder: string, opts?: { skipCachePrompt?: boolean }) => {
+  const handleOpen = useCallback(async (rawFolder: string, opts?: { skipCachePrompt?: boolean; game?: string }) => {
     const folder = rawFolder.trim();
     if (!folder) return;
+    setOpenedGame(opts?.game ?? null);
     setOpenLevelModalOpen(false);
     setError(null);
     setBusy(true);
@@ -1012,6 +1014,7 @@ export function App() {
 
   const handleClose = useCallback(() => {
     setSummary(null);
+    setOpenedGame(null);
     setInstances([]);
     setUFrags([]);
     setMeshes(null);
@@ -1034,6 +1037,19 @@ export function App() {
     setCompletedPhases([]);
     log("info", "Level closed");
   }, [log, selection, edits]);
+
+  // Friendly map name derived from the level folder. V2 levels nest as
+  // `…/packed/levels/<map>/built/levels/<map>`; RFOM/TOD point at the level
+  // dir directly. Walk up skipping the generic `built`/`levels` segments and
+  // take the first meaningful name.
+  const mapName = useMemo(() => {
+    if (!summary?.folder) return null;
+    const parts = summary.folder
+      .replace(/\\/g, "/")
+      .split("/")
+      .filter((p) => p && p !== "built" && p !== "levels");
+    return parts[parts.length - 1] ?? null;
+  }, [summary?.folder]);
 
   // Distinct (albedo, normal, emissive) shader triples across every submesh —
   // matches what the viewport material cache keys by, so the count reflects
@@ -1185,6 +1201,15 @@ export function App() {
             {APP_BRAND_NAME}
             <span className="brand-version mono small">v{APP_VERSION}</span>
           </span>
+
+          {mapName && (
+            <span className="open-level-badge" title={summary?.folder ?? undefined}>
+              {openedGame && (
+                <span className="open-level-badge-game mono">{openedGame}</span>
+              )}
+              <span className="open-level-badge-map mono">{mapName}</span>
+            </span>
+          )}
 
           <Menu label={t("menu.file")}>
             <MenuItem onSelect={() => setOpenLevelModalOpen(true)}>

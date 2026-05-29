@@ -2700,7 +2700,12 @@ pub fn cache_status(folder: String) -> Result<CacheStatus, String> {
     }
     let stale = is_cache_stale(Path::new(&folder), &manifest.source_mtimes);
 
-    let incomplete = !manifest.complete;
+    // Force a fresh extraction on every open when a debug filter or the
+    // explicit force flag is set. Lets the debug loop (set RECHIMERA_DEBUG_MOBY,
+    // re-open, read logs) skip the manual `_rechimera_cache` wipe — the cache
+    // is reported incomplete so the open flow rebuilds it.
+    let force = force_reextract_env();
+    let incomplete = !manifest.complete || force;
     Ok(CacheStatus {
         exists: true,
         folder,
@@ -2712,6 +2717,11 @@ pub fn cache_status(folder: String) -> Result<CacheStatus, String> {
         stale: stale || incomplete,
         incomplete,
     })
+}
+
+fn force_reextract_env() -> bool {
+    std::env::var("RECHIMERA_FORCE_REEXTRACT").is_ok()
+        || std::env::var("RECHIMERA_DEBUG_MOBY").is_ok()
 }
 
 fn cache_status_from_dir(
