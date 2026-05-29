@@ -378,11 +378,12 @@ export function AssetWorkbench({
     };
   }, [loaded]);
 
-  const toggleMesh = useCallback((uuid: string) => {
+  const setMeshHidden = useCallback((uuid: string, hidden: boolean) => {
     setHidden((prev) => {
+      if (hidden === prev.has(uuid)) return prev;
       const next = new Set(prev);
-      if (next.has(uuid)) next.delete(uuid);
-      else next.add(uuid);
+      if (hidden) next.add(uuid);
+      else next.delete(uuid);
       return next;
     });
   }, []);
@@ -501,7 +502,7 @@ export function AssetWorkbench({
                 <SubmeshList
                   meshes={loaded.meshes}
                   hidden={hidden}
-                  onToggle={toggleMesh}
+                  onSetHidden={setMeshHidden}
                 />
               )}
               {!loading && !error && loaded && drawerTab === "textures" && (
@@ -675,17 +676,47 @@ function DrawerTabButton({
 function SubmeshList({
   meshes,
   hidden,
-  onToggle,
+  onSetHidden,
 }: {
   meshes: MeshEntry[];
   hidden: Set<string>;
-  onToggle: (uuid: string) => void;
+  onSetHidden: (uuid: string, hidden: boolean) => void;
 }): ReactNode {
+  const dragTargetRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    const endDrag = () => {
+      dragTargetRef.current = null;
+    };
+    window.addEventListener("mouseup", endDrag);
+    window.addEventListener("mouseleave", endDrag);
+    return () => {
+      window.removeEventListener("mouseup", endDrag);
+      window.removeEventListener("mouseleave", endDrag);
+    };
+  }, []);
+
   if (meshes.length === 0) {
     return <div className="aw-status small dim">—</div>;
   }
+
+  const onEyeMouseDown = (uuid: string, isHidden: boolean) => (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const target = !isHidden;
+    dragTargetRef.current = target;
+    onSetHidden(uuid, target);
+  };
+
+  const onEyeMouseEnter = (uuid: string, isHidden: boolean) => () => {
+    const target = dragTargetRef.current;
+    if (target == null) return;
+    if (isHidden === target) return;
+    onSetHidden(uuid, target);
+  };
+
   return (
-    <ul className="aw-list">
+    <ul className="aw-list" onDragStart={(e) => e.preventDefault()}>
       {meshes.map((m, i) => {
         const isHidden = hidden.has(m.uuid);
         return (
@@ -693,9 +724,16 @@ function SubmeshList({
             <button
               type="button"
               className="aw-eye"
-              onClick={() => onToggle(m.uuid)}
+              onMouseDown={onEyeMouseDown(m.uuid, isHidden)}
+              onMouseEnter={onEyeMouseEnter(m.uuid, isHidden)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSetHidden(m.uuid, !isHidden);
+                }
+              }}
               aria-label={isHidden ? "Show" : "Hide"}
-              title={isHidden ? "Show" : "Hide"}
+              title={isHidden ? "Show (drag to paint)" : "Hide (drag to paint)"}
             >
               {isHidden ? <EyeOff size={12} /> : <Eye size={12} />}
             </button>
@@ -779,16 +817,16 @@ function AnimationList({
           >
             <button
               type="button"
-              className="aw-anim-pick"
+              className="aw-anim-row-btn"
               onClick={() => onPick(i)}
-              title="Play"
+              aria-pressed={active}
+              title={clip.name || `clip_${i}`}
             >
-              <Play size={11} />
+              <span className="aw-row-label small mono">{clip.name || `clip_${i}`}</span>
+              <span className="aw-row-meta small dim mono">
+                {clip.duration.toFixed(2)}s
+              </span>
             </button>
-            <span className="aw-row-label small mono">{clip.name || `clip_${i}`}</span>
-            <span className="aw-row-meta small dim mono">
-              {clip.duration.toFixed(2)}s
-            </span>
           </li>
         );
       })}

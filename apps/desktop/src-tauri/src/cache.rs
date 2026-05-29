@@ -398,8 +398,11 @@ fn decode_clips_for_moby_inline(
                 header.frames_ptr
             );
         }
-        if skel_bones > 0 {
+        if header.is_additive() && skel_bones > 0 {
             header.num_bones = skel_bones;
+        }
+        if !matches!(layout, LevelLayout::Tod) {
+            header.apply_frame_stride_padding();
         }
         // TOD pair-frame encoding: each logical keyframe is stored as TWO
         // consecutive frame_stride rows — even-index = zero filler,
@@ -427,42 +430,59 @@ fn decode_clips_for_moby_inline(
             let n8_bytes = header.num_8bit_tracks as usize;
             let min_data = ((padded_i16 + n8_bytes) + 15) & !15;
             let stride_usize = header.frame_stride as usize;
-            // Pair-frame encoding only applies when (a) the disk stride
-            // equals the minimum data size AND (b) the anim has zero
-            // 8-bit delta tracks. Anims with n8 > 0 use the i8 delta
-            // tracks as their compression mechanism and store one real
-            // keyframe per disk frame regardless of stride/min_data ratio.
-            // RE'd from the [tod-anim] APPLIED/SKIPPED audit:
-            //   animate_spin (n8=0): pair-framed, smooth Y rotation in odd frames
-            //   pterodactyl_fly / wasp_idle / wasp_attack_full (n8 > 0):
-            //     NOT pair-framed; pair-frame transform produced distorted
-            //     bones radiating from origin.
-            // TOD animation decoding is disabled across the board until
-            // we RE the format properly. Neither IT nor ReLunacy supports
-            // TOD anims; our probes showed that pair-frame works for
-            // n8=0 anims but the n8>0 i8-delta encoding produces wild
-            // distortion. Rather than ship a mix of working + visibly
-            // broken anims, T-pose every TOD anim and surface bind-pose
-            // characters. Simple anims (animate_spin, doors, kerchu_roller_roll)
-            // can be re-enabled later by removing this guard once the
-            // full TOD decode path is solved.
-            if log_probes && should_log_tod_anim_decision(moby_tuid, &header.name) {
-                let kind = if min_data > 0
-                    && stride_usize == min_data
-                    && header.num_8bit_tracks == 0
-                {
-                    "n8=0 simple"
+            let is_simple_pair_frame = header.num_8bit_tracks == 0
+                && min_data > 0
+                && stride_usize == min_data;
+            if is_simple_pair_frame {
+                // n8=0 simple anims store every other disk frame as zero
+                // filler; real keyframes live at odd indices. Halve
+                // num_frames, double frame_stride, offset frames_ptr by
+                // one (original) stride so frame[0] lands on the first
+                // real keyframe. RE'd from `animate_spin` (smooth linear
+                // Y rotation across odd frames). See `project_tod_anim_format`
+                // memory.
+                let real_frames = header.num_frames / 2;
+                if real_frames >= 1 {
+                    header.frames_ptr = header.frames_ptr.saturating_add(header.frame_stride as u32);
+                    header.frame_stride = header.frame_stride.saturating_mul(2);
+                    header.num_frames = real_frames;
+                    header.frame_rate /= 2.0;
+                    if log_probes && should_log_tod_anim_decision(moby_tuid, &header.name) {
+                        eprintln!(
+                            "[tod-anim] PAIR    moby_{:04X} '{}' n16={} stride→{} frames→{} fps→{}",
+                            moby_tuid, header.name,
+                            header.num_16bit_tracks,
+                            header.frame_stride, header.num_frames, header.frame_rate,
+                        );
+                    }
+                    // Fall through to standard decode below.
                 } else {
-                    "n8>0 complex"
-                };
-                eprintln!(
-                    "[tod-anim] T-POSE   moby_{:04X} '{}' n16={} n8={} stride={} min_data={} ({}) → skip decode",
-                    moby_tuid, header.name,
-                    header.num_16bit_tracks, header.num_8bit_tracks,
-                    stride_usize, min_data, kind,
-                );
+                    if log_probes && should_log_tod_anim_decision(moby_tuid, &header.name) {
+                        eprintln!(
+                            "[tod-anim] T-POSE   moby_{:04X} '{}' n16={} (degenerate pair-frame: real_frames=0) → skip",
+                            moby_tuid, header.name, header.num_16bit_tracks,
+                        );
+                    }
+                    continue;
+                }
+            } else if header.num_8bit_tracks > 0 {
+                // Complex anims (n8 > 0): per-frame i8 delta encoding
+                // produces wild distortion when run through the standard
+                // decoder. No reference implementation in IT or ReLunacy.
+                // T-pose for now; revisit per `project_tod_anim_format`.
+                if log_probes && should_log_tod_anim_decision(moby_tuid, &header.name) {
+                    eprintln!(
+                        "[tod-anim] T-POSE   moby_{:04X} '{}' n16={} n8={} stride={} min_data={} (n8>0 complex) → skip decode",
+                        moby_tuid, header.name,
+                        header.num_16bit_tracks, header.num_8bit_tracks,
+                        stride_usize, min_data,
+                    );
+                }
+                continue;
             }
-            continue;
+            // n8=0 with stride > min_data: anim packs real keyframes into
+            // every disk frame already, no pair-frame transform needed.
+            // Fall through to standard decode.
         }
         let ctrl = match read_animation_control(&mut ig, &header) {
             Ok(c) => c,

@@ -41,12 +41,16 @@ pub struct TrackMask {
 
 impl TrackMask {
     fn unpack(raw: u16) -> Self {
+        let unk = (raw & 0b11) as u8;
+        if unk != 2 && std::env::var("RECHIMERA_LOG_ANIM_DETAIL").is_ok() {
+            eprintln!(
+                "[anim-track-mask] WARN raw=0x{:04X} unk={} (IT asserts == 2; suspect garbage control blob or wrong frame_stride padding)",
+                raw, unk
+            );
+        }
         TrackMask {
-
             bone_index: (raw >> 6) & 0x3FF,
-
             component: ((raw >> 2) & 0b11) as u8,
-
             kind: TrackKind::from_bits(raw >> 4),
         }
     }

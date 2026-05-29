@@ -8983,6 +8983,27 @@ textarea {
   text-decoration: line-through;
 }
 .aw-eye,
+.aw-anim-row-btn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+.aw-anim-row-btn:hover .aw-row-label {
+  color: var(--text);
+}
+.aw-anim-row-btn:focus-visible {
+  outline: 1px solid var(--brand-color, #ff6363);
+  outline-offset: 1px;
+}
 .aw-anim-pick {
   appearance: none;
   background: transparent;
