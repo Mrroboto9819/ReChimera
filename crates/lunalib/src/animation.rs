@@ -3,6 +3,7 @@
 use std::io::{Read, Seek};
 
 use crate::error::Result;
+use crate::game::AnimProfile;
 use crate::igfile::IgFile;
 use crate::skeleton::Skeleton;
 
@@ -100,8 +101,17 @@ impl AnimationHeader {
     /// pos≈0 / scale≈0, while `head_visemes` (0x0007, no 0x200) decodes
     /// pos≈bind / scale≈1.0. IT's enum doesn't name this bit and its decoder
     /// ignores it, so this is RE'd from our own data.
-    pub const fn is_delta_pos_scale(&self) -> bool {
-        self.flags & 0x0200 != 0
+    ///
+    /// **A/B bypass:** Set `RECHIMERA_DISABLE_DELTA_PS=1` to force this to false
+    /// regardless of the flag bit. Use to verify whether the §3.12 rule applies
+    /// to a given game (R3 face = yes; R2 weapon `_fire_p` clips suspected no).
+    /// Temporary: will be replaced by per-game `AnimProfile` once R2 fire is
+    /// confirmed to not want delta-add.
+    pub fn is_delta_pos_scale(&self) -> bool {
+        if self.flags & 0x0200 == 0 {
+            return false;
+        }
+        std::env::var("RECHIMERA_DISABLE_DELTA_PS").is_err()
     }
 
     /// Mirror IT's `FByteswapper<Animation>` (serialize.cpp:660): non-packed
@@ -334,6 +344,168 @@ pub struct DecodedClip {
 }
 
 impl DecodedClip {
+    /// For 0x0200 additive overlays (R2 weapon `*_fire_p` and similar),
+    /// fill any non-animated bone channel with the corresponding channel from
+    /// a `base` clip (the matching `*_idle_p`). This is the runtime "additive
+    /// layer" the game does at playback: idle holds the weapon pose, fire
+    /// only kicks the few recoil bones. Without composing, the fire overlay
+    /// shows the un-kicked bones in skeleton bind pose (T-shape arms).
+    ///
+    /// Idle frames are sampled with wrap-around (`f % base_nf`) so a 21-frame
+    /// fire clip can pull from a 50-frame looping idle. Position/scale/rotation
+    /// are all replaced — for animated bones the fire's own per-frame values
+    /// are kept.
+    pub fn compose_with_base(&mut self, base: &DecodedClip, overlay_blend: bool) -> (usize, usize, usize) {
+        if self.bones.len() != base.bones.len() {
+            return (0, 0, 0);
+        }
+        let force_all = std::env::var("RECHIMERA_COMPOSE_FORCE")
+            .map(|v| v.eq_ignore_ascii_case("all"))
+            .unwrap_or(false);
+        let fire_nf = self.num_frames.max(1) as usize;
+        let base_nf = base.num_frames.max(1) as usize;
+        let mut rot_copied = 0usize;
+        let mut tra_copied = 0usize;
+        let mut scl_copied = 0usize;
+        for (b, bone) in self.bones.iter_mut().enumerate() {
+            let base_bone = &base.bones[b];
+            // Compute idle's per-frame rotation (expanded to fire_nf frames).
+            let idle_rot: Option<Vec<f32>> = if base_bone.rotation_animated
+                && base_bone.rotations.len() >= base_nf * 4
+            {
+                let mut out = Vec::with_capacity(fire_nf * 4);
+                for f in 0..fire_nf {
+                    let bf = (f % base_nf) * 4;
+                    out.extend_from_slice(&base_bone.rotations[bf..bf + 4]);
+                }
+                Some(out)
+            } else if base_bone.rotations.len() == 4 {
+                let q = &base_bone.rotations[..4];
+                let mut out = Vec::with_capacity(fire_nf * 4);
+                for _ in 0..fire_nf {
+                    out.extend_from_slice(q);
+                }
+                Some(out)
+            } else {
+                None
+            };
+            if let Some(idle_rot) = idle_rot {
+                if bone.rotation_animated && overlay_blend && !force_all
+                    && bone.rotations.len() >= fire_nf * 4
+                {
+                    // Runtime additive-layer blend (PS3 R2 weapon overlay).
+                    // The encoded fire data per frame is a quaternion that
+                    // ALMOST always equals fire's per-clip `ref_rotation`
+                    // (the per-bone neutral pose for this clip). On frames
+                    // where recoil kicks, the decoded quat diverges from the
+                    // ref. The game runtime extracts that divergence:
+                    //   delta[f] = decoded[f] * ref_rotation.inverse()
+                    // and applies it on top of whatever the underlying layer
+                    // (idle) provides:
+                    //   final[f] = idle[f] * delta[f]
+                    // When decoded ≈ ref, delta ≈ identity, final = idle.
+                    // When recoil hits, delta is the recoil rotation and
+                    // final = idle composed with recoil.
+                    //
+                    // This is what IT's `BlendResultAdditive` would do (if
+                    // anyone ever wired it up — gltf_shared.cpp:36-64); IT's
+                    // version uses skel_bind as the base, we use the matching
+                    // idle clip's per-frame pose instead because that's what
+                    // the game actually runs underneath.
+                    let r = bone.ref_rotation;
+                    // ref_rotation inverse = conjugate for a unit quat
+                    let ri = [-r[0], -r[1], -r[2], r[3]];
+                    for f in 0..fire_nf {
+                        let d = [
+                            bone.rotations[f * 4],
+                            bone.rotations[f * 4 + 1],
+                            bone.rotations[f * 4 + 2],
+                            bone.rotations[f * 4 + 3],
+                        ];
+                        let i = [
+                            idle_rot[f * 4], idle_rot[f * 4 + 1],
+                            idle_rot[f * 4 + 2], idle_rot[f * 4 + 3],
+                        ];
+                        // delta = decoded * ref^-1
+                        let (dx, dy, dz, dw) = quat_mul(d, ri);
+                        // final = idle * delta
+                        let (x, y, z, w) = quat_mul(i, [dx, dy, dz, dw]);
+                        // Hemisphere fix vs idle so three.js doesn't
+                        // interpolate the long way around.
+                        let dot = x*i[0] + y*i[1] + z*i[2] + w*i[3];
+                        let s = if dot < 0.0 { -1.0 } else { 1.0 };
+                        let len_sq = x*x + y*y + z*z + w*w;
+                        let inv = if len_sq > 1e-12 { s / len_sq.sqrt() } else { 1.0 };
+                        bone.rotations[f * 4]     = x * inv;
+                        bone.rotations[f * 4 + 1] = y * inv;
+                        bone.rotations[f * 4 + 2] = z * inv;
+                        bone.rotations[f * 4 + 3] = w * inv;
+                    }
+                    rot_copied += 1;
+                } else if !bone.rotation_animated || force_all {
+                    bone.rotations = idle_rot;
+                    bone.rotation_animated = true;
+                    rot_copied += 1;
+                }
+            }
+            let want_tra = !bone.translation_animated || force_all;
+            if want_tra {
+                let new_tra = if base_bone.translation_animated
+                    && base_bone.translations.len() >= base_nf * 3
+                {
+                    let mut out = Vec::with_capacity(fire_nf * 3);
+                    for f in 0..fire_nf {
+                        let bf = (f % base_nf) * 3;
+                        out.extend_from_slice(&base_bone.translations[bf..bf + 3]);
+                    }
+                    Some(out)
+                } else if base_bone.translations.len() == 3 {
+                    let v = &base_bone.translations[..3];
+                    let mut out = Vec::with_capacity(fire_nf * 3);
+                    for _ in 0..fire_nf {
+                        out.extend_from_slice(v);
+                    }
+                    Some(out)
+                } else {
+                    None
+                };
+                if let Some(out) = new_tra {
+                    bone.translations = out;
+                    bone.translation_animated = true;
+                    tra_copied += 1;
+                }
+            }
+            let want_scl = !bone.scale_animated || force_all;
+            if want_scl {
+                let new_scl = if base_bone.scale_animated
+                    && base_bone.scales.len() >= base_nf * 3
+                {
+                    let mut out = Vec::with_capacity(fire_nf * 3);
+                    for f in 0..fire_nf {
+                        let bf = (f % base_nf) * 3;
+                        out.extend_from_slice(&base_bone.scales[bf..bf + 3]);
+                    }
+                    Some(out)
+                } else if base_bone.scales.len() == 3 {
+                    let v = &base_bone.scales[..3];
+                    let mut out = Vec::with_capacity(fire_nf * 3);
+                    for _ in 0..fire_nf {
+                        out.extend_from_slice(v);
+                    }
+                    Some(out)
+                } else {
+                    None
+                };
+                if let Some(out) = new_scl {
+                    bone.scales = out;
+                    bone.scale_animated = true;
+                    scl_copied += 1;
+                }
+            }
+        }
+        (rot_copied, tra_copied, scl_copied)
+    }
+
     /// For additive clips, compose the decoded delta values with the skeleton's
     /// bind pose to produce absolute values that three.js can play directly.
     /// Matches IT's `AnimationMachine::BlendResultAdditive` (gltf_shared.cpp):
@@ -472,6 +644,156 @@ pub struct DecodedBone {
     pub rotation_animated: bool,
     pub translation_animated: bool,
     pub scale_animated: bool,
+    /// 4-bit mask of which rotation components had at least one track entry
+    /// (bit 0 = X, 1 = Y, 2 = Z, 3 = W). For 0x0200 additive overlays, missing
+    /// components in animated bones need to be merged from the underlying idle
+    /// layer at compose time — the on-disk data leaves them at clip ref-pose
+    /// (often 0) because the runtime engine fills them from the layer below.
+    /// See IT gltf_shared.cpp:137-140 — IT seeds the same way and has the
+    /// same blind-spot for standalone export.
+    pub rot_components: u8,
+    /// Per-clip per-bone reference rotation (dequantized from
+    /// `AnimationControl::ref_pose_rotations[b]`). Used by `compose_with_base`
+    /// to compute the actual runtime additive delta:
+    ///   `delta[f] = decoded[f] * ref_rotation.inverse()`
+    ///   `final[f] = base[f]   * delta[f]`
+    /// When fire's decoded ≈ ref_rotation (no recoil at that frame), the
+    /// delta is identity and the bone stays at idle's pose. When recoil
+    /// kicks, the delta is the rotation difference and lays on top of idle.
+    pub ref_rotation: [f32; 4],
+}
+
+/// IT's `AnimationMachine::PropagateScaleFrames` (animation_machine.cpp:96-157)
+/// pre-multiplies each bone's per-frame translation/scale by its parent's
+/// per-frame scale. This compensates for IT's `_s` proxy-bone architecture
+/// (extract_gltf.cpp:35-66) which splits every bone into a translation+rotation
+/// node and a leaf `_s` scale node. Because IT puts scale on a leaf, GLTF
+/// auto-inheritance can't propagate it to children, so IT re-injects it by
+/// hand via this pre-multiply.
+///
+/// Our pipeline does NOT generate `_s` proxy bones — each Insomniac bone
+/// becomes one GLTF node carrying translation+rotation+scale, and GLTF's
+/// natural transform inheritance already propagates parent scale to children.
+/// Applying IT's pre-multiply on top of that yields DOUBLE-scaling: idle
+/// clips look fine because parent scales are ≈ 1.0 (1*1 = 1), but additive
+/// overlays like `*_fire_p` that animate parent-bone scales contort visibly.
+///
+/// Kept here (not called) so the function is one line away if we ever add
+/// the `_s` proxy hierarchy to match IT's GLTF layout.
+#[allow(dead_code)]
+fn propagate_scale_frames(clip: &mut DecodedClip, skel: &Skeleton) {
+    let nf = clip.num_frames as usize;
+    if nf == 0 {
+        return;
+    }
+    let nb = clip.bones.len();
+    if nb == 0 || nb != skel.bones.len() {
+        return;
+    }
+
+    let bind_scale: Vec<[f32; 3]> = skel
+        .bind_local
+        .iter()
+        .map(|bl| {
+            let sx = (bl[0] * bl[0] + bl[1] * bl[1] + bl[2] * bl[2]).sqrt();
+            let sy = (bl[4] * bl[4] + bl[5] * bl[5] + bl[6] * bl[6]).sqrt();
+            let sz = (bl[8] * bl[8] + bl[9] * bl[9] + bl[10] * bl[10]).sqrt();
+            [
+                if sx > 0.0 { sx } else { 1.0 },
+                if sy > 0.0 { sy } else { 1.0 },
+                if sz > 0.0 { sz } else { 1.0 },
+            ]
+        })
+        .collect();
+    let bind_trans: Vec<[f32; 3]> = skel
+        .bind_local
+        .iter()
+        .map(|bl| [bl[12], bl[13], bl[14]])
+        .collect();
+
+    // Helper: ensure a bone's scales/translations are expanded to nf frames.
+    fn ensure_frames(buf: &mut Vec<f32>, animated: &mut bool, nf: usize, bind: [f32; 3]) {
+        if *animated && buf.len() == nf * 3 {
+            return;
+        }
+        let seed: [f32; 3] = if !*animated && buf.len() == 3 {
+            [buf[0], buf[1], buf[2]]
+        } else {
+            bind
+        };
+        let mut next = Vec::with_capacity(nf * 3);
+        for _ in 0..nf {
+            next.extend_from_slice(&seed);
+        }
+        *buf = next;
+        *animated = true;
+    }
+
+    // Topological order: each bone's parent must be processed before it.
+    // Skeleton bones are stored in tree order in practice, but enforce here.
+    let mut order: Vec<usize> = Vec::with_capacity(nb);
+    let mut visited = vec![false; nb];
+    fn visit(i: usize, skel: &Skeleton, order: &mut Vec<usize>, visited: &mut [bool]) {
+        if i >= skel.bones.len() || visited[i] {
+            return;
+        }
+        let b = skel.bones[i];
+        let p = b.parent_index;
+        if p >= 0 && (p as usize) != i && (p as usize) < skel.bones.len() {
+            visit(p as usize, skel, order, visited);
+        }
+        visited[i] = true;
+        order.push(i);
+    }
+    for i in 0..nb {
+        visit(i, skel, &mut order, &mut visited);
+    }
+
+    for &i in &order {
+        let bone = &skel.bones[i];
+        if bone.dont_inherit_scale() {
+            continue;
+        }
+        let parent = match bone.parent() {
+            Some(p) if p != i && p < nb => p,
+            _ => continue,
+        };
+
+        let parent_scale: Vec<[f32; 3]> = {
+            let pb = &clip.bones[parent];
+            if pb.scale_animated && pb.scales.len() == nf * 3 {
+                (0..nf)
+                    .map(|f| [pb.scales[f * 3], pb.scales[f * 3 + 1], pb.scales[f * 3 + 2]])
+                    .collect()
+            } else if !pb.scale_animated && pb.scales.len() == 3 {
+                let s = [pb.scales[0], pb.scales[1], pb.scales[2]];
+                (0..nf).map(|_| s).collect()
+            } else {
+                let s = bind_scale[parent];
+                (0..nf).map(|_| s).collect()
+            }
+        };
+
+        let nb_ref = &mut clip.bones[i];
+        ensure_frames(&mut nb_ref.scales, &mut nb_ref.scale_animated, nf, bind_scale[i]);
+        for f in 0..nf {
+            nb_ref.scales[f * 3] *= parent_scale[f][0];
+            nb_ref.scales[f * 3 + 1] *= parent_scale[f][1];
+            nb_ref.scales[f * 3 + 2] *= parent_scale[f][2];
+        }
+
+        ensure_frames(
+            &mut nb_ref.translations,
+            &mut nb_ref.translation_animated,
+            nf,
+            bind_trans[i],
+        );
+        for f in 0..nf {
+            nb_ref.translations[f * 3] *= parent_scale[f][0];
+            nb_ref.translations[f * 3 + 1] *= parent_scale[f][1];
+            nb_ref.translations[f * 3 + 2] *= parent_scale[f][2];
+        }
+    }
 }
 
 fn dequantize_quaternion(qi: [i16; 4]) -> [f32; 4] {
@@ -503,7 +825,9 @@ pub fn decode_animation<R: Read + Seek>(
     position_scale: f32,
     scale_scale: f32,
 ) -> Result<DecodedClip> {
-    decode_animation_with_skel_bones(ig, h, ctrl, position_scale, scale_scale, None, None)
+    decode_animation_with_skel_bones(
+        ig, h, ctrl, position_scale, scale_scale, None, None, AnimProfile::LEGACY,
+    )
 }
 
 /// Convenience wrapper used by the V2 cache path: passes the skeleton so the
@@ -517,8 +841,11 @@ pub fn decode_animation_with_skel<R: Read + Seek>(
     position_scale: f32,
     scale_scale: f32,
     skel: &Skeleton,
+    profile: AnimProfile,
 ) -> Result<DecodedClip> {
-    decode_animation_with_skel_bones(ig, h, ctrl, position_scale, scale_scale, None, Some(skel))
+    decode_animation_with_skel_bones(
+        ig, h, ctrl, position_scale, scale_scale, None, Some(skel), profile,
+    )
 }
 
 /// Same as `decode_animation` but lets the caller override the bone count when
@@ -537,6 +864,7 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
     scale_scale: f32,
     override_num_bones: Option<u16>,
     skel: Option<&Skeleton>,
+    profile: AnimProfile,
 ) -> Result<DecodedClip> {
     let (ref_trans, ref_scale) = match skel {
         Some(s) => {
@@ -585,6 +913,13 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
 
     let mut rot_values: Vec<[i16; 4]> = vec![[0; 4]; nb * nf];
     let mut rot_animated: Vec<bool> = vec![false; nb];
+    // Per-bone 4-bit mask of which rotation components had at least one track.
+    // See IT gltf_shared.cpp:137-140 — IT seeds animated rotations with the
+    // clip's RefPoseRotations[bone] and overwrites only the components that
+    // have tracks. For 0x0200 overlays (R2 weapon `_fire_p`) the engine relies
+    // on the runtime layer below to provide the un-tracked components; for
+    // standalone playback we have to do that ourselves in compose.
+    let mut rot_components: Vec<u8> = vec![0u8; nb];
 
     for b in 0..nb {
         let r = ctrl.ref_pose_rotations.get(b).copied().unwrap_or([0, 0, 0, 32767]);
@@ -715,6 +1050,7 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 TrackKind::Rotation => {
                     if c < 4 {
                         rot_values[b * nf + f][c] = v;
+                        rot_components[b] |= 1 << c;
                     }
                 }
                 TrackKind::Position => {
@@ -754,6 +1090,7 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 TrackKind::Rotation => {
                     if c < 4 {
                         rot_values[b * nf + f][c] = value;
+                        rot_components[b] |= 1 << c;
                     }
                 }
                 TrackKind::Position => {
@@ -774,11 +1111,25 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
     }
 
     let additive = h.is_additive();
-    let delta_ps = h.is_delta_pos_scale();
+    let delta_ps = profile.delta_pos_scale_active(h.flags & 0x0200 != 0);
+
     let mut bones = Vec::with_capacity(nb);
+    let blend_gate = profile.blend_mask_rotation_gate_active();
     for b in 0..nb {
 
         let blend_mask = ctrl.blend_masks.get(b).copied().unwrap_or(1);
+        // 0x0200 clips: the per-clip `ctrl.ref_pose_rotations` is in a
+        // clip-local frame that does NOT match the skeleton bind frame
+        // (bone 18 in carbine_fire_p: clip_ref ~identity vs skel_bind 90°X)
+        // — using it as fallback for non-animated bones twists the body
+        // onto its side. Using SKELETON BIND as the fallback puts the body
+        // upright (verified 2026-05-30).
+        //
+        // Per-frame ANIMATED rotation tracks are the canonical absolute
+        // rotation as-is. Tried composing `bind * decoded` 2026-05-30 —
+        // produced T-pose arms because `decoded ≈ identity` for most
+        // frames, proving the values aren't bind-relative quaternion
+        // deltas. So animated rotations stay direct.
         let rotations = if rot_animated[b] {
             let mut out = Vec::with_capacity(nf * 4);
             for f in 0..nf {
@@ -786,13 +1137,19 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 out.extend_from_slice(&q);
             }
             out
-        } else if additive && blend_mask == 0 {
+        } else if additive && blend_mask == 0 && blend_gate {
             // IT gltf_shared.cpp:282 — for additive clips, a bone outside
             // this blend layer (blend_mask == 0) gets NO rotation channel.
-            // Its ref_pose_rotations entry is stale/garbage for bones the
-            // layer doesn't touch, so emitting it would rotate a bone that
-            // should stay at bind (the split upper/lower face-rig bug).
+            // Gated by profile: needed for R3 split upper/lower face rigs;
+            // misfires on R2 weapon `_fire_p` overlays where it drops valid
+            // bone rotations from the rig.
             Vec::new()
+        } else if delta_ps {
+            let bind_q = skel
+                .and_then(|s| s.bind_local.get(b).copied())
+                .map(|bl| extract_bind_rotation(&bl))
+                .unwrap_or([0.0, 0.0, 0.0, 1.0]);
+            bind_q.to_vec()
         } else {
             let q = dequantize_quaternion(
                 ctrl.ref_pose_rotations.get(b).copied().unwrap_or([0, 0, 0, 32767]),
@@ -803,9 +1160,14 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
         let rt_fallback = ref_trans.as_ref().and_then(|v| v.get(b).copied()).unwrap_or([0.0; 3]);
         let rs_fallback = ref_scale.as_ref().and_then(|v| v.get(b).copied()).unwrap_or([1.0; 3]);
 
-        // For 0x200 (delta) clips the animated component is a delta from the
-        // bone's bind value: final = bind + decoded. For absolute clips the
-        // decoded value is used directly.
+        // For 0x200 (delta) clips both POSITION and SCALE are delta-from-bind:
+        // `final = bind + decoded`. R2 weapon `_fire_p` overlays carry 237
+        // scale ref entries with raw=(0,0,0) encoding "no change from bind";
+        // without the bind bias those collapse to scale 0 and the mesh flattens.
+        // R3 face rig fix 2026-05-28 (lower-face bones) needs the same for
+        // position. IT's standalone path doesn't do this — IT's GLTF for these
+        // clips is also broken; this is our delta-decode for the standalone
+        // viewer.
         let pos_bias = |c: usize| if delta_ps { rt_fallback[c] } else { 0.0 };
         let scl_bias = |c: usize| if delta_ps { rs_fallback[c] } else { 0.0 };
 
@@ -869,6 +1231,12 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
             Vec::new()
         };
 
+        let ref_rot_q = dequantize_quaternion(
+            ctrl.ref_pose_rotations
+                .get(b)
+                .copied()
+                .unwrap_or([0, 0, 0, 32767]),
+        );
         bones.push(DecodedBone {
             rotations,
             translations,
@@ -876,62 +1244,21 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
             rotation_animated: rot_animated[b],
             translation_animated: pos_animated[b],
             scale_animated: scl_animated[b],
+            rot_components: rot_components[b],
+            ref_rotation: ref_rot_q,
         });
     }
 
-    if std::env::var("RECHIMERA_LOG_ANIM_DETAIL").is_ok() && additive {
-        let mut shown = 0;
-        for (b, bone) in bones.iter().enumerate() {
-            if shown >= 8 {
-                break;
-            }
-            let pos_anim = bone.translation_animated && bone.translations.len() >= 3;
-            let scl_anim = bone.scale_animated && bone.scales.len() >= 3;
-            if !pos_anim && !scl_anim {
-                continue;
-            }
-            let bt = ref_trans.as_ref().and_then(|v| v.get(b).copied()).unwrap_or([0.0; 3]);
-            let p0 = if pos_anim {
-                [bone.translations[0], bone.translations[1], bone.translations[2]]
-            } else { [f32::NAN; 3] };
-            let s0 = if scl_anim {
-                [bone.scales[0], bone.scales[1], bone.scales[2]]
-            } else { [f32::NAN; 3] };
-            // Rotation: is the decoded frame-0 quat closer to identity (delta)
-            // or to bind (absolute)? Tells us whether 0x200 also makes rotation
-            // a delta from bind.
-            let (rdesc, dot_id, dot_bind) = if bone.rotation_animated && bone.rotations.len() >= 4 {
-                let q = [bone.rotations[0], bone.rotations[1], bone.rotations[2], bone.rotations[3]];
-                let bq = skel
-                    .and_then(|s| s.bind_local.get(b).copied())
-                    .map(|bl| extract_bind_rotation(&bl))
-                    .unwrap_or([0.0, 0.0, 0.0, 1.0]);
-                let di = q[3].abs();
-                let db = (bq[0] * q[0] + bq[1] * q[1] + bq[2] * q[2] + bq[3] * q[3]).abs();
-                let tag = if di > db { "~IDENTITY(delta)" } else { "~BIND(abs)" };
-                (tag, di, db)
-            } else {
-                ("none", f32::NAN, f32::NAN)
-            };
-            eprintln!(
-                "[pos-probe] clip='{}' bone={} pos0=({:.4},{:.4},{:.4}) bindT=({:.4},{:.4},{:.4}) \
-                 scl0=({:.3},{:.3},{:.3}) rot={} dotId={:.3} dotBind={:.3}",
-                h.name, b,
-                p0[0], p0[1], p0[2], bt[0], bt[1], bt[2],
-                s0[0], s0[1], s0[2], rdesc, dot_id, dot_bind,
-            );
-            shown += 1;
-        }
-    }
-
-    Ok(DecodedClip {
+    let clip = DecodedClip {
         name: h.name.clone(),
         num_frames: h.num_frames,
         frame_rate: h.frame_rate,
         looping: h.is_looping(),
         additive: h.is_additive(),
         bones,
-    })
+    };
+    let _ = skel;
+    Ok(clip)
 }
 
 fn decompose_skeleton_ref_pose(skel: &Skeleton) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
@@ -1236,6 +1563,8 @@ pub fn decode_animation_with_skeleton<R: Read + Seek>(
             rotations,
             translations,
             scales,
+            rot_components: 0xF,
+            ref_rotation: [0.0, 0.0, 0.0, 1.0],
         });
     }
 

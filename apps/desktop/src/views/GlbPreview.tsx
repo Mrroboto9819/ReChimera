@@ -62,6 +62,58 @@ const MATERIAL_TEXTURE_SLOTS = [
   "thicknessMap",
 ] as const;
 
+function sanitizeSkinnedMeshes(scene: THREE.Object3D): void {
+  scene.traverse((obj) => {
+    const sm = obj as THREE.SkinnedMesh;
+    if (!sm.isSkinnedMesh || !sm.skeleton) return;
+
+    const bones = sm.skeleton.bones;
+    const idxAttr = sm.geometry?.getAttribute("skinIndex") as
+      | THREE.BufferAttribute
+      | undefined;
+    if (!idxAttr) return;
+
+    let fallback = -1;
+    for (let i = 0; i < bones.length; i++) {
+      if (bones[i]) {
+        fallback = i;
+        break;
+      }
+    }
+    if (fallback < 0) return;
+
+    const safe = (v: number) =>
+      v >= 0 && v < bones.length && bones[v] ? v : fallback;
+
+    let remapped = 0;
+    for (let i = 0; i < idxAttr.count; i++) {
+      const x = idxAttr.getX(i);
+      const y = idxAttr.getY(i);
+      const z = idxAttr.getZ(i);
+      const w = idxAttr.getW(i);
+      const sx = safe(x);
+      const sy = safe(y);
+      const sz = safe(z);
+      const sw = safe(w);
+      if (sx !== x || sy !== y || sz !== z || sw !== w) {
+        idxAttr.setXYZW(i, sx, sy, sz, sw);
+        remapped++;
+      }
+    }
+
+    if (remapped > 0) {
+      idxAttr.needsUpdate = true;
+      sm.geometry.boundingBox = null;
+      sm.geometry.boundingSphere = null;
+      console.warn(
+        `[glb-skin] ${sm.name || "skinned mesh"}: remapped ${remapped} vertices ` +
+          `with out-of-range joint indices (skeleton has ${bones.length} bones). ` +
+          `Cache GLB is likely stale — re-bake to fix at the source.`,
+      );
+    }
+  });
+}
+
 function disposeGltfScene(scene: THREE.Object3D): void {
   const seenMaterials = new Set<THREE.Material>();
   const seenTextures = new Set<THREE.Texture>();
@@ -238,6 +290,7 @@ export function GlbPreview({
                 `[probe-moby] scene skinned-meshes=${skinnedMeshCount} skel_bones=${skinnedMeshBoneCount} null_bones=${nullBones}`,
               );
             }
+            sanitizeSkinnedMeshes(gltf.scene);
             setLoaded({
               scene: gltf.scene,
               animations: gltf.animations,

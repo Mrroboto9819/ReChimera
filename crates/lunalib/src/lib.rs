@@ -4,6 +4,7 @@
 pub mod animation;
 pub mod asset_lookup_extract;
 pub mod assetlookup;
+pub mod game;
 pub mod cubemap;
 pub mod outfitter_names;
 pub mod error;
@@ -65,6 +66,7 @@ pub use asset_lookup_extract::{
     KindOverview,
 };
 pub use assetlookup::{AssetKind, AssetLookup, AssetPointer};
+pub use game::{AnimProfile, Game};
 pub use outfitter_names::{
     find_configs_dir as find_outfitter_configs_dir,
     load_from_assetlookup as load_outfitter_names_from_assetlookup,

@@ -6845,6 +6845,18 @@ textarea {
   justify-content: space-between;
   gap: 10px;
 }
+.r2-reextract-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.r2-reextract-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
 .r2-maps-search {
   flex: 1;
   max-width: 320px;

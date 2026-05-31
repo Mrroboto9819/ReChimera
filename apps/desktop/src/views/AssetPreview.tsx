@@ -197,7 +197,7 @@ function PreviewScene({
       if (emissive && mat.emissiveMap !== emissive) {
         mat.emissiveMap = emissive;
         mat.emissive = new THREE.Color(0xffffff);
-        mat.emissiveIntensity = 0.7;
+        mat.emissiveIntensity = 0.15;
         touched = true;
       }
       if (touched) mat.needsUpdate = true;

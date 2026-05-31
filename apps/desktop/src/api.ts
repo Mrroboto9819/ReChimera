@@ -173,12 +173,14 @@ export const readCachedBytes = (folder: string, file: string) =>
 export const extractLevelToCache = (
   folder: string,
   onEvent: Channel<CacheEvent>,
-) => invoke<void>("extract_level_to_cache", { folder, onEvent });
+  gameId?: string,
+) => invoke<void>("extract_level_to_cache", { folder, gameId, onEvent });
 
 export const reextractLevelCache = (
   folder: string,
   onEvent: Channel<CacheEvent>,
-) => invoke<void>("reextract_level_cache", { folder, onEvent });
+  gameId?: string,
+) => invoke<void>("reextract_level_cache", { folder, gameId, onEvent });
 
 
 
@@ -232,12 +234,14 @@ export const decodeAnimsetClip = (
   assetTuidHex: string,
   animsetHash: string,
   clipIndex: number,
+  gameId?: string,
 ) =>
   invoke<DecodedClipDto>("decode_animset_clip", {
     folder,
     assetTuidHex,
     animsetHash,
     clipIndex,
+    gameId,
   });
 
 export interface ClipPick {

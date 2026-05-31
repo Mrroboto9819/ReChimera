@@ -243,8 +243,8 @@ export async function exportToGlb(
           color: 0xffffff,
           roughness: 0.85,
           metalness: 0,
-          emissive: s.emissive_id != null ? 0xffffff : 0x000000,
-          emissiveIntensity: s.emissive_id != null ? 0.7 : 0,
+          emissive: 0x000000,
+          emissiveIntensity: 0,
           name: `slots_a${s.albedo_id ?? "_"}_n${s.normal_id ?? "_"}_e${s.emissive_id ?? "_"}`,
         });
         if (s.albedo_id != null) neededAlbedos.add(s.albedo_id);

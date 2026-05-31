@@ -309,6 +309,22 @@ export function R2Wizard({
   const [prepareTotal, setPrepareTotal] = useState(0);
   const [prepareMode, setPrepareMode] = useState<"fresh" | "rebuild" | "reuse">("fresh");
 
+  const [alwaysReextract, setAlwaysReextract] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("rechimera.alwaysReextract") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleAlwaysReextract = useCallback((next: boolean) => {
+    setAlwaysReextract(next);
+    try {
+      localStorage.setItem("rechimera.alwaysReextract", next ? "1" : "0");
+    } catch {
+      /* noop */
+    }
+  }, []);
+
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -517,7 +533,7 @@ export function R2Wizard({
   }, [status, startPatches, continueToMaps]);
 
   const prepareAndOpen = useCallback(
-    async (mapId: string, path: string) => {
+    async (mapId: string, path: string, force = false) => {
       let existingCache = false;
       let cacheStale = false;
       let cacheIncomplete = false;
@@ -530,10 +546,11 @@ export function R2Wizard({
         existingCache = false;
       }
 
+      const forceRebuild = force || alwaysReextract;
       let mode: "fresh" | "rebuild" | "reuse";
       if (!existingCache) {
         mode = "fresh";
-      } else if (cacheStale || cacheIncomplete) {
+      } else if (cacheStale || cacheIncomplete || forceRebuild) {
         mode = "rebuild";
       } else {
         let needsRebuild = globalsForceRebuildRef.current;
@@ -579,9 +596,9 @@ export function R2Wizard({
           }
         };
         if (mode === "rebuild") {
-          await reextractLevelCache(path, ch);
+          await reextractLevelCache(path, ch, gameId);
         } else {
-          await extractLevelToCache(path, ch);
+          await extractLevelToCache(path, ch, gameId);
         }
       } catch (e) {
         setMapsError(String(e));
@@ -591,18 +608,18 @@ export function R2Wizard({
       globalsForceRebuildRef.current = false;
       onOpen(path, { skipCachePrompt: true });
     },
-    [usrdir, onOpen],
+    [usrdir, onOpen, alwaysReextract],
   );
 
   const pickMap = useCallback(
-    async (m: R2MapInfo) => {
+    async (m: R2MapInfo, force = false) => {
       if (!m.psarc_present && !m.ready) return;
       setMapsError(null);
       setPickedMap(m);
       if (m.ready) {
         try {
           const path = await r2LevelOpenPath(usrdir.trim(), m.id, entryFile);
-          await prepareAndOpen(m.id, path);
+          await prepareAndOpen(m.id, path, force);
         } catch (e) {
           setMapsError(String(e));
         }
@@ -1108,6 +1125,17 @@ export function R2Wizard({
             <span className="small dim">
               {filteredMaps.length} of {maps.length}
             </span>
+            <label
+              className="r2-reextract-toggle small"
+              title="When on, opening any map rebuilds its cache from scratch instead of reusing it. Slower, but guarantees the latest decoder runs."
+            >
+              <input
+                type="checkbox"
+                checked={alwaysReextract}
+                onChange={(e) => toggleAlwaysReextract(e.target.checked)}
+              />
+              Always re-extract on open
+            </label>
           </div>
 
           {mapsBusy && <div className="dim small">Scanning levels…</div>}
@@ -1302,6 +1330,16 @@ export function R2Wizard({
                     >
                       {selected.ready ? "Open Level" : "Extract & Open"}
                     </button>
+                    {canOpen && (
+                      <button
+                        type="button"
+                        onClick={() => pickMap(selected, true)}
+                        disabled={!canOpen}
+                        title="Rebuild this map's entire cache from scratch (mobys, ties, textures, animations) with the current decoder."
+                      >
+                        Re-extract
+                      </button>
+                    )}
                     {availableSprites.length > 0 && (
                       <button
                         type="button"
