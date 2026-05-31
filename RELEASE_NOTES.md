@@ -54,13 +54,8 @@
 - ToD wizard adaptation (still uses the generic folder picker)
 - ToD character animations decoding (T-pose only currently)
 - ToD skybox decoder
+- Resistance 3 — try-and-fix pass for terrains, animations, and textures on models that aren't extracting the way they should
 - Collision geometry parsing (currently a Godot-side workaround)
 - FBX export (disabled this round; use GLB)
-- Integrated PS3 disc decryption (currently an external pre-step)
 - `hover.wav` global delegate and `back.wav` for non-modal back actions
 
-## Install
-
-Pick the bundle for your OS. Windows shows an **Update** button on existing installs; macOS / Linux reinstall manually.
-
-For pre-release builds, see the [canary channel](../../releases?q=canary&expanded=true). Expect breakage; file issues with the full version string (e.g. `0.5.1-15`).

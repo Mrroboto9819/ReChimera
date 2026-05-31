@@ -7309,7 +7309,10 @@ textarea {
   display: flex;
   gap: 0;
   border-bottom: 1px solid var(--hud-rule);
-  padding: 0 20px;
+  /* No horizontal padding — the first tab's left edge should align with
+   * the toolbar (search field) above and the map grid below, so the
+   * visual column stays consistent down the entire panel. */
+  padding: 0;
   background: transparent;
 }
 .r2-hud-tab {
@@ -7317,6 +7320,9 @@ textarea {
   border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
+  /* First tab carries no left padding so its label edge aligns with the
+   * toolbar content; subsequent tabs space themselves via their own
+   * horizontal padding. */
   padding: 10px 16px;
   color: var(--hud-text-dim);
   font-size: 11px;
@@ -7325,6 +7331,9 @@ textarea {
   cursor: pointer;
   font-weight: 500;
   transition: color 100ms ease-out, border-color 100ms ease-out;
+}
+.r2-hud-tab:first-child {
+  padding-left: 0;
 }
 .r2-hud-tab:hover {
   color: var(--hud-text);
@@ -9302,4 +9311,46 @@ textarea {
 :root[data-app-skin="resistance2"] .r2-busy-banner-body strong {
   color: var(--hud-amber-strong);
   letter-spacing: 1.5px;
+}
+
+/* What's-new modal — alias the docs-modal markdown rules so the release-notes
+ * body inherits the same typography (headings, code, tables, blockquotes)
+ * without duplicating ~80 lines of CSS. */
+.whats-new-modal-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 70vh;
+}
+.whats-new-markdown {
+  flex: 1;
+  overflow: auto;
+  padding-right: 8px;
+  line-height: 1.55;
+}
+.whats-new-markdown h1,
+.whats-new-markdown h2,
+.whats-new-markdown h3 {
+  margin-top: 1.4em;
+  margin-bottom: 0.4em;
+  color: var(--text);
+}
+.whats-new-markdown h1 { font-size: 20px; }
+.whats-new-markdown h2 { font-size: 16px; }
+.whats-new-markdown h3 { font-size: 14px; }
+.whats-new-markdown p,
+.whats-new-markdown li {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.whats-new-markdown a {
+  color: var(--accent-blue);
+}
+.whats-new-markdown code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--hairline);
 }

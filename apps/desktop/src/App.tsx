@@ -72,6 +72,8 @@ import { SoundPlayer, type NowPlaying } from "./components/SoundPlayer";
 import { Splash } from "./views/Splash";
 import { UpdateChecker } from "./components/UpdateChecker";
 import { useUpdater } from "./useUpdater";
+import { WhatsNewModal } from "./components/WhatsNewModal";
+import { useWhatsNew } from "./useWhatsNew";
 import { StatusBar } from "./views/StatusBar";
 import { TitleBar } from "./views/TitleBar";
 import { Toolbar } from "./views/Toolbar";
@@ -236,9 +238,10 @@ export function App() {
   const [completedPhases, setCompletedPhases] = useState<PhaseId[]>([]);
   const [consoleLog, setConsoleLog] = useState<ConsoleEntry[]>([]);
   const updater = useUpdater();
-  
-  
-  
+  const whatsNew = useWhatsNew();
+
+
+
   const [aboutModalOpen, setAboutModalOpen] = useState(false);
   const [docsModalOpen, setDocsModalOpen] = useState(false);
   const [openLevelModalOpen, setOpenLevelModalOpen] = useState(false);
@@ -1337,6 +1340,9 @@ export function App() {
             <MenuItem onSelect={() => setDocsModalOpen(true)}>
               Documentation…
             </MenuItem>
+            <MenuItem onSelect={() => whatsNew.showManually()}>
+              What's new…
+            </MenuItem>
             <MenuItem onSelect={() => void openExternal(APP_REPO_URL)}>
               GitHub Repository
             </MenuItem>
@@ -1947,6 +1953,8 @@ export function App() {
         open={docsModalOpen}
         onClose={() => setDocsModalOpen(false)}
       />
+
+      <WhatsNewModal open={whatsNew.open} onClose={whatsNew.close} />
 
       <UpdateChecker state={updater} />
 

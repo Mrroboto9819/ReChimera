@@ -769,11 +769,17 @@ export function R2Wizard({
   const filteredMaps = useMemo(() => {
     const q = mapsQuery.trim().toLowerCase();
     if (!q) return maps;
-    return maps.filter(
-      (m) =>
-        m.id.toLowerCase().includes(q) ||
-        m.display_name.toLowerCase().includes(q),
-    );
+    // Split the query into whitespace-separated tokens and require ALL
+    // tokens to match the haystack (name + id + category). This makes
+    // multi-word queries like "co op chicago" work without forcing the
+    // user to remember the exact display order. Each token is a plain
+    // substring match (no regex), so special characters in the level id
+    // (e.g. dots, underscores) are matched literally.
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return maps.filter((m) => {
+      const hay = `${m.display_name} ${m.id} ${m.category}`.toLowerCase();
+      return tokens.every((t) => hay.includes(t));
+    });
   }, [maps, mapsQuery]);
 
   const groupedMaps = useMemo(() => {
@@ -790,8 +796,20 @@ export function R2Wizard({
 
   useEffect(() => {
     if (phase !== "maps") return;
+    // If the currently-active category is empty (e.g. user picked a
+    // multiplayer-only USRDIR so the default "Campaign" tab has 0
+    // entries), auto-switch to the first non-empty category in the
+    // canonical order: campaign → coop → multiplayer → lobby → other.
+    // Without this the user lands on an empty tab and sees "No maps
+    // in Campaign" with no obvious next action.
     const list = groupedMaps[activeCategory] ?? [];
     if (list.length === 0) {
+      const order: R2MapCategory[] = ["campaign", "coop", "multiplayer", "lobby", "other"];
+      const next = order.find((c) => (groupedMaps[c]?.length ?? 0) > 0);
+      if (next && next !== activeCategory) {
+        setActiveCategory(next);
+        return;
+      }
       setSelectedMapId(null);
       return;
     }
@@ -1122,9 +1140,6 @@ export function R2Wizard({
               ariaLabel="Filter maps"
               hotkey="/"
             />
-            <span className="small dim">
-              {filteredMaps.length} of {maps.length}
-            </span>
             <label
               className="r2-reextract-toggle small"
               title="When on, opening any map rebuilds its cache from scratch instead of reusing it. Slower, but guarantees the latest decoder runs."
