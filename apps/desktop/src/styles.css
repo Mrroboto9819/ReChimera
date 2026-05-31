@@ -3444,6 +3444,35 @@ textarea {
   border-radius: var(--r-1);
   overflow: hidden;
   background: var(--bg-2);
+  /* Subtle border + cursor hint so users know the preview is interactive
+   * (drag to orbit, scroll to zoom). The border is invisible at rest so it
+   * doesn't compete with the model, then fades to the accent color on hover.
+   * `cursor: grab` -> `grabbing` covers the drag gesture. */
+  border: 1px solid transparent;
+  cursor: grab;
+  transition:
+    border-color 140ms ease-out,
+    box-shadow 140ms ease-out,
+    background 140ms ease-out;
+}
+.cache-library-canvas:hover {
+  border-color: var(--accent-blue, #55b3ff);
+  box-shadow:
+    0 0 0 1px rgba(85, 179, 255, 0.18) inset,
+    0 4px 18px rgba(0, 0, 0, 0.35);
+  background: var(--bg-1);
+}
+.cache-library-canvas:active,
+.cache-library-canvas.is-dragging {
+  cursor: grabbing;
+}
+/* Resistance 2 / HUD skin override — amber instead of blue so the hover
+ * stays inside the skin's visual language. */
+:root[data-app-skin="resistance2"] .cache-library-canvas:hover {
+  border-color: var(--hud-amber, #f4a93d);
+  box-shadow:
+    0 0 0 1px rgba(244, 169, 61, 0.20) inset,
+    0 4px 18px rgba(0, 0, 0, 0.45);
 }
 
 .cache-texture-preview {
