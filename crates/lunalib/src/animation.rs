@@ -415,6 +415,12 @@ impl DecodedClip {
                     let r = bone.ref_rotation;
                     // ref_rotation inverse = conjugate for a unit quat
                     let ri = [-r[0], -r[1], -r[2], r[3]];
+                    // Some bones (notably the weapon grip / right-hand chain)
+                    // appear to need the inverse delta — recoil kicks the
+                    // wrong way around the axis. Set RECHIMERA_RECOIL_INVERT=1
+                    // to use `final = idle * delta⁻¹` instead of `idle * delta`
+                    // for a quick A/B test of the global direction.
+                    let invert_delta = std::env::var("RECHIMERA_RECOIL_INVERT").is_ok();
                     for f in 0..fire_nf {
                         let d = [
                             bone.rotations[f * 4],
@@ -428,8 +434,15 @@ impl DecodedClip {
                         ];
                         // delta = decoded * ref^-1
                         let (dx, dy, dz, dw) = quat_mul(d, ri);
+                        // Optionally invert delta (env-gated A/B for bones
+                        // whose recoil direction looks reversed).
+                        let delta = if invert_delta {
+                            [-dx, -dy, -dz, dw]
+                        } else {
+                            [dx, dy, dz, dw]
+                        };
                         // final = idle * delta
-                        let (x, y, z, w) = quat_mul(i, [dx, dy, dz, dw]);
+                        let (x, y, z, w) = quat_mul(i, delta);
                         // Hemisphere fix vs idle so three.js doesn't
                         // interpolate the long way around.
                         let dot = x*i[0] + y*i[1] + z*i[2] + w*i[3];

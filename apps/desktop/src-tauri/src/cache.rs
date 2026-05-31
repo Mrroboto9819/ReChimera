@@ -794,7 +794,9 @@ fn compose_additive_overlays(clips: &mut Vec<DecodedClip>, _debug: bool) {
             Some(base_idx) => {
                 let base = clips[base_idx].clone();
                 let base_nf = base.num_frames;
-                if fire_name == "mp_carbine_fire_p" {
+                if fire_name == "mp_carbine_fire_p"
+                    && std::env::var("RECHIMERA_LOG_FIRE_VS_IDLE").is_ok()
+                {
                     dump_fire_vs_idle_rotations(&clips[fire_idx], &base);
                 }
                 let (rc, tc, sc) = clips[fire_idx].compose_with_base(&base, true);
@@ -823,8 +825,6 @@ fn dump_fire_vs_idle_rotations(fire: &lunalib::DecodedClip, base: &lunalib::Deco
         fire.name, fire.num_frames, base.name, base.num_frames);
     let fire_nf = fire.num_frames.max(1) as usize;
     let base_nf = base.num_frames.max(1) as usize;
-    let mut shown = 0usize;
-    let _ = shown;
     // Dump frame-0 only for ALL animated bones — find the ones whose rotation
     // would land somewhere wrong after fill. Look for bones where fire's
     // tracked components produce a quat that doesn't blend cleanly with idle.
