@@ -9264,6 +9264,46 @@ textarea {
   white-space: nowrap;
 }
 
+.aw-view-controls {
+  position: absolute;
+  top: 52px;
+  right: 10px;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+}
+.aw-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--text-2);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition:
+    background 120ms ease-out,
+    color 120ms ease-out,
+    border-color 120ms ease-out;
+}
+.aw-view-btn:hover {
+  background: rgba(20, 24, 30, 0.75);
+  color: var(--text);
+}
+.aw-view-btn.active {
+  border-color: #00ff88;
+  color: #00ff88;
+  background: rgba(0, 255, 136, 0.12);
+}
+
+.aw-row.is-hover {
+  background: rgba(51, 153, 255, 0.16);
+  box-shadow: inset 2px 0 0 rgba(51, 153, 255, 0.7);
+}
+
 @keyframes r2BusyPulse {
   0%, 100% {
     box-shadow:

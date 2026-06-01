@@ -11,6 +11,7 @@ import { Bounds, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
+  Bone,
   Download,
   Eye,
   EyeOff,
@@ -281,6 +282,33 @@ function AnimRig({ scene, clip, isPlaying, onFrame, seekRef }: AnimRigProps) {
   return null;
 }
 
+function SkeletonView({
+  scene,
+  visible,
+}: {
+  scene: THREE.Group;
+  visible: boolean;
+}) {
+  const helper = useMemo(() => {
+    const h = new THREE.SkeletonHelper(scene);
+    const mat = h.material as THREE.LineBasicMaterial;
+    mat.color.set(0x00ff88);
+    mat.depthTest = false;
+    mat.transparent = true;
+    mat.opacity = 0.9;
+    h.renderOrder = 999;
+    return h;
+  }, [scene]);
+  useEffect(() => {
+    return () => {
+      helper.geometry.dispose();
+      (helper.material as THREE.LineBasicMaterial).dispose();
+    };
+  }, [helper]);
+  helper.visible = visible;
+  return <primitive object={helper} />;
+}
+
 export function AssetWorkbench({
   instance,
   cacheFolder,
@@ -300,6 +328,8 @@ export function AssetWorkbench({
   const [duration, setDuration] = useState(0);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const seekRef = useRef<((seconds: number) => void) | null>(null);
+  const [showBones, setShowBones] = useState(false);
+  const [hoveredUuid, setHoveredUuid] = useState<string | null>(null);
 
   const assetTuidHex = useMemo(() => {
     if (overrideAsset) return overrideAsset.tuid;
@@ -396,6 +426,42 @@ export function AssetWorkbench({
       }
     });
   }, [loaded, hidden]);
+
+  const hasBones = useMemo(() => {
+    if (!loaded) return false;
+    let found = false;
+    loaded.scene.traverse((o) => {
+      if ((o as THREE.Bone).isBone) found = true;
+    });
+    return found;
+  }, [loaded]);
+
+  useEffect(() => {
+    if (!loaded || !hoveredUuid) return;
+    const obj = loaded.scene.getObjectByProperty("uuid", hoveredUuid) as
+      | THREE.Mesh
+      | undefined;
+    if (!obj || !(obj as THREE.Mesh).isMesh) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    const restore: Array<() => void> = [];
+    for (const mat of mats) {
+      const std = mat as THREE.MeshStandardMaterial;
+      if (!std || !std.isMeshStandardMaterial) continue;
+      const prevEmissive = std.emissive.getHex();
+      const prevIntensity = std.emissiveIntensity;
+      std.emissive = new THREE.Color(0x33ddff);
+      std.emissiveIntensity = 1.0;
+      std.needsUpdate = true;
+      restore.push(() => {
+        std.emissive = new THREE.Color(prevEmissive);
+        std.emissiveIntensity = prevIntensity;
+        std.needsUpdate = true;
+      });
+    }
+    return () => {
+      for (const r of restore) r();
+    };
+  }, [loaded, hoveredUuid]);
 
   const activeClip = useMemo(() => {
     if (!loaded || activeClipIndex == null) return null;
@@ -503,6 +569,8 @@ export function AssetWorkbench({
                   meshes={loaded.meshes}
                   hidden={hidden}
                   onSetHidden={setMeshHidden}
+                  hoveredUuid={hoveredUuid}
+                  onHover={setHoveredUuid}
                 />
               )}
               {!loading && !error && loaded && drawerTab === "textures" && (
@@ -537,6 +605,9 @@ export function AssetWorkbench({
               <primitive object={loaded.scene} />
             </Bounds>
           )}
+          {loaded && hasBones && (
+            <SkeletonView scene={loaded.scene} visible={showBones} />
+          )}
           {loaded && (
             <AnimRig
               scene={loaded.scene}
@@ -557,6 +628,22 @@ export function AssetWorkbench({
             {activeClip ? activeClip.name : "rest pose"}
           </span>
         </div>
+
+        {hasBones && (
+          <div className="aw-view-controls">
+            <button
+              type="button"
+              className={`aw-view-btn ${showBones ? "active" : ""}`}
+              onClick={() => setShowBones((v) => !v)}
+              aria-pressed={showBones}
+              title={showBones ? "Hide skeleton" : "Show skeleton"}
+              aria-label={showBones ? "Hide skeleton" : "Show skeleton"}
+            >
+              <Bone size={14} />
+            </button>
+          </div>
+        )}
+
 
         <div className="aw-export-wrap">
           <Button
@@ -677,10 +764,14 @@ function SubmeshList({
   meshes,
   hidden,
   onSetHidden,
+  hoveredUuid,
+  onHover,
 }: {
   meshes: MeshEntry[];
   hidden: Set<string>;
   onSetHidden: (uuid: string, hidden: boolean) => void;
+  hoveredUuid: string | null;
+  onHover: (uuid: string | null) => void;
 }): ReactNode {
   const dragTargetRef = useRef<boolean | null>(null);
 
@@ -720,7 +811,12 @@ function SubmeshList({
       {meshes.map((m, i) => {
         const isHidden = hidden.has(m.uuid);
         return (
-          <li key={m.uuid} className={`aw-row ${isHidden ? "hidden" : ""}`}>
+          <li
+            key={m.uuid}
+            className={`aw-row ${isHidden ? "hidden" : ""} ${m.uuid === hoveredUuid ? "is-hover" : ""}`}
+            onMouseEnter={() => onHover(m.uuid)}
+            onMouseLeave={() => onHover(null)}
+          >
             <button
               type="button"
               className="aw-eye"
