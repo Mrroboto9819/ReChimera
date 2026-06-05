@@ -370,6 +370,7 @@ pub fn write_animated_level_glb(
             shaders,
             textures,
             Some((placement.translation, placement.rotation, placement.scale)),
+            false,
         )?;
         if !placement.name.is_empty() {
             doc.nodes[root_idx as usize].name = Some(placement.name.clone());

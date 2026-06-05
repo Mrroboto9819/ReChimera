@@ -442,24 +442,24 @@ export function AssetWorkbench({
       | THREE.Mesh
       | undefined;
     if (!obj || !(obj as THREE.Mesh).isMesh) return;
-    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    const restore: Array<() => void> = [];
-    for (const mat of mats) {
-      const std = mat as THREE.MeshStandardMaterial;
-      if (!std || !std.isMeshStandardMaterial) continue;
-      const prevEmissive = std.emissive.getHex();
-      const prevIntensity = std.emissiveIntensity;
-      std.emissive = new THREE.Color(0x33ddff);
-      std.emissiveIntensity = 1.0;
-      std.needsUpdate = true;
-      restore.push(() => {
-        std.emissive = new THREE.Color(prevEmissive);
-        std.emissiveIntensity = prevIntensity;
-        std.needsUpdate = true;
-      });
-    }
+    const original = obj.material;
+    const highlight = (m: THREE.Material): THREE.Material => {
+      const c = m.clone();
+      const std = c as THREE.MeshStandardMaterial;
+      if (std.isMeshStandardMaterial) {
+        std.emissive = new THREE.Color(0x33ddff);
+        std.emissiveIntensity = 1.0;
+      }
+      return c;
+    };
+    const swapped = Array.isArray(original)
+      ? original.map(highlight)
+      : highlight(original);
+    obj.material = swapped;
     return () => {
-      for (const r of restore) r();
+      obj.material = original;
+      if (Array.isArray(swapped)) swapped.forEach((m) => m.dispose());
+      else swapped.dispose();
     };
   }, [loaded, hoveredUuid]);
 

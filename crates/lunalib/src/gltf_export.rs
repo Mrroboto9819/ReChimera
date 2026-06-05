@@ -81,6 +81,7 @@ pub fn append_moby_to_doc(
     shaders: &HashMap<u64, ShaderInfo>,
     textures: &HashMap<u32, Vec<u8>>,
     placement: Option<([f32; 3], [f32; 4], [f32; 3])>,
+    split_submeshes: bool,
 ) -> Result<u32> {
     let asset_root_idx = doc.nodes.len() as u32;
     let (translation, rotation, scale) = placement.unwrap_or(([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]));
@@ -136,7 +137,7 @@ pub fn append_moby_to_doc(
         }
         let mut primitives: Vec<Primitive> = Vec::with_capacity(bangle.meshes.len());
         let mut bangle_has_skin = false;
-        for mesh in &bangle.meshes {
+        for (mi, mesh) in bangle.meshes.iter().enumerate() {
             let material_idx = build_material(
                 &mut doc.bin,
                 &mut doc.buffer_views,
@@ -149,7 +150,7 @@ pub fn append_moby_to_doc(
                 textures,
                 mesh.shader_index as usize,
             );
-            if let Some(prim) = push_submesh(
+            let prim = match push_submesh(
                 &mut doc.bin,
                 &mut doc.accessors,
                 &mut doc.buffer_views,
@@ -158,16 +159,52 @@ pub fn append_moby_to_doc(
                 bone_count,
                 material_idx,
             )? {
-                if prim
-                    .attributes
-                    .contains_key(&Checked::Valid(Semantic::Joints(0)))
-                {
+                Some(prim) => prim,
+                None => continue,
+            };
+            let prim_has_skin = prim
+                .attributes
+                .contains_key(&Checked::Valid(Semantic::Joints(0)));
+
+            if split_submeshes {
+                total_primitives += 1;
+                let name = format!("{}_Mesh_{bi}_{mi}", asset_display_name(asset));
+                let mesh_idx = doc.meshes.len() as u32;
+                doc.meshes.push(gltf_json::Mesh {
+                    extensions: Default::default(),
+                    extras: Default::default(),
+                    name: Some(name.clone()),
+                    primitives: vec![prim],
+                    weights: None,
+                });
+                let node_idx = doc.nodes.len() as u32;
+                doc.nodes.push(gltf_json::Node {
+                    camera: None,
+                    children: None,
+                    extensions: Default::default(),
+                    extras: Default::default(),
+                    matrix: None,
+                    mesh: Some(Index::new(mesh_idx)),
+                    name: Some(name),
+                    rotation: None,
+                    scale: None,
+                    translation: None,
+                    skin: if prim_has_skin && skin_idx.is_some() {
+                        Some(Index::new(skin_idx.unwrap()))
+                    } else {
+                        None
+                    },
+                    weights: None,
+                });
+                bangle_node_indices.push(node_idx);
+            } else {
+                if prim_has_skin {
                     bangle_has_skin = true;
                 }
                 primitives.push(prim);
             }
         }
-        if primitives.is_empty() {
+        if split_submeshes || primitives.is_empty() {
             continue;
         }
         total_primitives += primitives.len();
@@ -241,7 +278,7 @@ pub fn write_moby_glb_full(
     textures: &HashMap<u32, Vec<u8>>,
 ) -> Result<Vec<u8>> {
     let mut doc = GltfDocBuilder::new();
-    let asset_root_idx = append_moby_to_doc(&mut doc, asset, clips, shaders, textures, None)?;
+    let asset_root_idx = append_moby_to_doc(&mut doc, asset, clips, shaders, textures, None, true)?;
 
     while doc.bin.len() % 4 != 0 {
         doc.bin.push(0);
