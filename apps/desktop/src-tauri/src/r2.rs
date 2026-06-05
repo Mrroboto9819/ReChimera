@@ -28,6 +28,13 @@ pub struct R2SetupStatus {
     /// streams but still be unplayable until `game.psarc` is unpacked,
     /// at which point `built/` materializes.
     pub any_level_built: bool,
+    /// `data/patch_NN.psarc` DLC content archives. The engine probes
+    /// patch_99 down to patch_01 at boot. Each carries either new DLC
+    /// MP levels (`built/levels/<dlc>/`) or a `built/patch/` overlay
+    /// holding DLC character bangles + supporting textures. R2/V2 only.
+    pub patch_psarcs: Vec<String>,
+    /// True when patch PSARCs are extracted (sentinel file in data/).
+    pub patches_extracted: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -120,6 +127,8 @@ pub fn r2_setup_check(usrdir: String) -> R2SetupStatus {
         || !root_psarcs.is_empty()
         || (packed_levels.is_dir() && any_level_built);
 
+    let (patch_psarcs, patches_extracted) = scan_patch_psarcs(root);
+
     R2SetupStatus {
         is_usrdir,
         global_cached: global_psarc_state(&packed_game, "global_cached"),
@@ -127,15 +136,57 @@ pub fn r2_setup_check(usrdir: String) -> R2SetupStatus {
         level_folder_count,
         root_psarcs,
         any_level_built,
+        patch_psarcs,
+        patches_extracted,
     }
+}
+
+fn scan_patch_psarcs(usrdir: &Path) -> (Vec<String>, bool) {
+    let data_dir = usrdir.join("data");
+    if !data_dir.is_dir() {
+        return (Vec::new(), false);
+    }
+    let mut names: Vec<String> = std::fs::read_dir(&data_dir)
+        .ok()
+        .into_iter()
+        .flat_map(|it| it.flatten())
+        .filter_map(|e| {
+            let p = e.path();
+            if !p.is_file() {
+                return None;
+            }
+            let n = p.file_name()?.to_str()?.to_string();
+            let lower = n.to_lowercase();
+            if lower.starts_with("patch_") && lower.ends_with(".psarc") {
+                Some(n)
+            } else {
+                None
+            }
+        })
+        .collect();
+    names.sort();
+
+    let all_extracted = !names.is_empty()
+        && names.iter().all(|n| {
+            let stem = n.trim_end_matches(".psarc").trim_end_matches(".PSARC");
+            data_dir.join(format!(".{stem}.extracted")).exists()
+        });
+    (names, all_extracted)
 }
 
 fn global_psarc_state(packed_game: &Path, variant: &str) -> PsarcState {
     let psarc = packed_game.join(format!("{variant}.psarc"));
-    let extracted_marker = packed_game.join(variant).join("built").join("tuids");
+    let extract_dir = packed_game.join(variant);
     let has_psarc = psarc.is_file();
-    let is_extracted = extracted_marker.is_dir()
-        && std::fs::read_dir(&extracted_marker)
+    // Why: `global_cached.psarc` extracts into `<variant>/built/tuids/...`
+    // (texture content) but `global_uncached.psarc` extracts into
+    // `<variant>/packed/game/global_uncached.toc` + `<variant>/sound/...`
+    // (dialogue stream + TOC stub) — NO `built/tuids/`. Checking only
+    // for `built/tuids/` made the wizard misreport `global_uncached` as
+    // not-extracted every time. Generic "is the variant folder non-empty"
+    // works for both variants and any future per-game variant.
+    let is_extracted = extract_dir.is_dir()
+        && std::fs::read_dir(&extract_dir)
             .map(|mut it| it.next().is_some())
             .unwrap_or(false);
     match (has_psarc, is_extracted) {
@@ -300,15 +351,183 @@ pub fn r2_extract_globals(
     for variant in ["global_cached", "global_uncached"] {
         let psarc = packed_game.join(format!("{variant}.psarc"));
         let out_dir = packed_game.join(variant);
-        let marker = out_dir.join("built").join("tuids");
-        if let Err(e) = extract_one_psarc(&psarc, &out_dir, Some(&marker), variant, &on_event)
-        {
-            let _ = on_event.send(R2ExtractEvent::Warning {
-                message: format!("{variant}: {e}"),
-            });
+        // Why: `built/tuids/` only exists after extracting `global_cached`
+        // (texture content). `global_uncached` extracts to `packed/.../*.toc`
+        // + `sound/...` — never produces `built/tuids/`. Use a per-variant
+        // sentinel file written only on successful completion so partial
+        // (interrupted) extractions retry instead of being mistaken for
+        // done. Same pattern as `r2_extract_patches`.
+        let sentinel = out_dir.join(".extracted");
+        match extract_one_psarc(&psarc, &out_dir, Some(&sentinel), variant, &on_event) {
+            Ok(()) => {
+                let _ = std::fs::write(&sentinel, b"");
+            }
+            Err(e) => {
+                let _ = on_event.send(R2ExtractEvent::Warning {
+                    message: format!("{variant}: {e}"),
+                });
+            }
         }
     }
     let _ = on_event.send(R2ExtractEvent::Done);
+    Ok(())
+}
+
+/// Extract every `data/patch_NN.psarc` into the USRDIR root in-place.
+/// Internal paths reconstitute as a layered overlay:
+///   - `built/patch/{assetlookup,mobys,textures,highmips,shaders,animsets,zones,lighting}.dat`
+///     → DLC character bangles + supporting textures (rachel, grim, malikov, ...)
+///   - `built/levels/<dlc_level>/*.dat`
+///     → brand-new DLC multiplayer maps (lumber_yard_multiplayer, twin_falls_multiplayer)
+///   - `data/configs/*.csv` (notably comp_outfitter.csv)
+///     → patched configs that REGISTER the new DLC bangle TUIDs (e.g.
+///       `BI_COMP_HMN_BODY_RACHEL → 0x677911930695ACB6`) — the outfitter-
+///       names parser at `crates/lunalib/src/outfitter_names.rs` picks
+///       these up automatically via the `data/configs/` walk-up rule.
+///
+/// Idempotent: writes a `data/.<stem>.extracted` sentinel per archive so
+/// re-runs skip already-extracted patches. Returns silently with no
+/// events when no patch archives exist (most non-PSN installs).
+#[tauri::command]
+pub fn r2_extract_patches(
+    usrdir: String,
+    on_event: Channel<R2ExtractEvent>,
+) -> Result<(), String> {
+    let root = Path::new(&usrdir);
+    let data_dir = root.join("data");
+    if !data_dir.is_dir() {
+        let _ = on_event.send(R2ExtractEvent::Done);
+        return Ok(());
+    }
+    let (names, _) = scan_patch_psarcs(root);
+    if names.is_empty() {
+        let _ = on_event.send(R2ExtractEvent::Done);
+        return Ok(());
+    }
+
+    for name in &names {
+        let psarc = data_dir.join(name);
+        let stem = name.trim_end_matches(".psarc").trim_end_matches(".PSARC");
+        let marker = data_dir.join(format!(".{stem}.extracted"));
+        if marker.exists() {
+            let _ = on_event.send(R2ExtractEvent::PsarcDone {
+                psarc: stem.to_string(),
+                skipped: true,
+            });
+            continue;
+        }
+        if let Some(diag) = sniff_psarc_magic(&psarc) {
+            let _ = on_event.send(R2ExtractEvent::Warning {
+                message: format!("{stem}: {diag}"),
+            });
+            continue;
+        }
+        if let Err(e) = extract_one_psarc(&psarc, root, None, stem, &on_event) {
+            let _ = on_event.send(R2ExtractEvent::Warning {
+                message: format!("{stem}: {e}"),
+            });
+            continue;
+        }
+        let _ = std::fs::write(&marker, b"");
+    }
+
+    relocate_patch_dlc_levels(root, &on_event);
+    alias_patch_overlay(root, &on_event);
+
+    let _ = on_event.send(R2ExtractEvent::Done);
+    Ok(())
+}
+
+/// Patches extract level files to `<usrdir>/built/levels/<dlc>/*.dat`, but
+/// `r2_list_maps` scans `<usrdir>/packed/levels/<level>/built/levels/<level>/`.
+/// Hardlink each new DLC level into the canonical wizard path so the maps
+/// list surfaces them alongside base-disc levels with zero extra disk use.
+fn relocate_patch_dlc_levels(usrdir: &Path, on_event: &Channel<R2ExtractEvent>) {
+    let src_levels = usrdir.join("built").join("levels");
+    if !src_levels.is_dir() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(&src_levels) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let src = entry.path();
+        if !src.is_dir() {
+            continue;
+        }
+        let Some(level_name) = src.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let dest = usrdir
+            .join("packed")
+            .join("levels")
+            .join(level_name)
+            .join("built")
+            .join("levels")
+            .join(level_name);
+        if dest.join("assetlookup.dat").is_file() {
+            continue;
+        }
+        if let Err(e) = std::fs::create_dir_all(&dest) {
+            let _ = on_event.send(R2ExtractEvent::Warning {
+                message: format!("mkdir {}: {e}", dest.display()),
+            });
+            continue;
+        }
+        let _ = mirror_dir_with_hardlinks(&src, &dest);
+    }
+}
+
+/// Stage the DLC overlay (`built/patch/`) as a fake level
+/// `packed/levels/dlc_overlay/built/levels/dlc_overlay/` so the existing
+/// Asset Lookup modal AND the maps list can target it as a level.
+fn alias_patch_overlay(usrdir: &Path, on_event: &Channel<R2ExtractEvent>) {
+    let src = usrdir.join("built").join("patch");
+    if !src.join("assetlookup.dat").is_file() {
+        return;
+    }
+    let dest = usrdir
+        .join("packed")
+        .join("levels")
+        .join("dlc_overlay")
+        .join("built")
+        .join("levels")
+        .join("dlc_overlay");
+    if dest.join("assetlookup.dat").is_file() {
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(&dest) {
+        let _ = on_event.send(R2ExtractEvent::Warning {
+            message: format!("mkdir {}: {e}", dest.display()),
+        });
+        return;
+    }
+    if let Err(e) = mirror_dir_with_hardlinks(&src, &dest) {
+        let _ = on_event.send(R2ExtractEvent::Warning {
+            message: format!("alias dlc_overlay: {e}"),
+        });
+    }
+}
+
+fn mirror_dir_with_hardlinks(src: &Path, dest: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let s = entry.path();
+        let Some(name) = s.file_name() else { continue };
+        let d = dest.join(name);
+        let ft = entry.file_type()?;
+        if ft.is_dir() {
+            std::fs::create_dir_all(&d)?;
+            mirror_dir_with_hardlinks(&s, &d)?;
+        } else if ft.is_file() {
+            if d.exists() {
+                continue;
+            }
+            if std::fs::hard_link(&s, &d).is_err() {
+                std::fs::copy(&s, &d)?;
+            }
+        }
+    }
     Ok(())
 }
 

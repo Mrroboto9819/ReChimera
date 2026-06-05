@@ -173,12 +173,14 @@ export const readCachedBytes = (folder: string, file: string) =>
 export const extractLevelToCache = (
   folder: string,
   onEvent: Channel<CacheEvent>,
-) => invoke<void>("extract_level_to_cache", { folder, onEvent });
+  gameId?: string,
+) => invoke<void>("extract_level_to_cache", { folder, gameId, onEvent });
 
 export const reextractLevelCache = (
   folder: string,
   onEvent: Channel<CacheEvent>,
-) => invoke<void>("reextract_level_cache", { folder, onEvent });
+  gameId?: string,
+) => invoke<void>("reextract_level_cache", { folder, gameId, onEvent });
 
 
 
@@ -232,12 +234,14 @@ export const decodeAnimsetClip = (
   assetTuidHex: string,
   animsetHash: string,
   clipIndex: number,
+  gameId?: string,
 ) =>
   invoke<DecodedClipDto>("decode_animset_clip", {
     folder,
     assetTuidHex,
     animsetHash,
     clipIndex,
+    gameId,
   });
 
 export interface ClipPick {
@@ -1179,6 +1183,55 @@ export function psarcExtractStream(
   return invoke<void>("psarc_extract_stream", { input, output, onEvent: ch });
 }
 
+export interface AssetLookupKindDto {
+  name: string;
+  section_id: number;
+  count: number;
+  has_decoder: boolean;
+}
+
+export interface AssetLookupOverviewDto {
+  layout: string;
+  version_major: number;
+  version_minor: number;
+  kinds: AssetLookupKindDto[];
+}
+
+export const assetLookupInspect = (path: string) =>
+  invoke<AssetLookupOverviewDto>("asset_lookup_inspect", { path });
+
+export type AssetLookupEvent =
+  | { type: "total"; kind: string; count: number }
+  | {
+      type: "entry";
+      kind: string;
+      index: number;
+      tuid: string;
+      ok: boolean;
+      message: string | null;
+    }
+  | { type: "kind_done"; kind: string }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+export function assetLookupExtractStream(
+  input: string,
+  output: string,
+  kinds: string[],
+  maxTextureDim: number | null,
+  onEvent: (e: AssetLookupEvent) => void,
+): Promise<void> {
+  const ch = new Channel<AssetLookupEvent>();
+  ch.onmessage = onEvent;
+  return invoke<void>("asset_lookup_extract_stream", {
+    input,
+    output,
+    kinds,
+    maxTextureDim,
+    onEvent: ch,
+  });
+}
+
 export type R2PsarcState = "ready" | "not_extracted" | "missing";
 
 export interface R2SetupStatus {
@@ -1195,6 +1248,15 @@ export interface R2SetupStatus {
    *  Distinguishes "USRDIR has level folders but they're just dialogue
    *  streams" (RFOM pre-extract) from "USRDIR is fully unpacked". */
   any_level_built: boolean;
+  /** `data/patch_NN.psarc` DLC content archives discovered in this USRDIR.
+   *  Each name is a basename like `patch_01.psarc`. Empty for non-PSN
+   *  installs and for non-V2 games. */
+  patch_psarcs: string[];
+  /** True when every entry in `patch_psarcs` has its
+   *  `data/.<stem>.extracted` sentinel written. The R2 wizard runs the
+   *  patch step automatically when this is false and `patch_psarcs`
+   *  is non-empty. */
+  patches_extracted: boolean;
 }
 
 export type R2MapCategory = "campaign" | "multiplayer" | "coop" | "lobby" | "other";
@@ -1228,6 +1290,24 @@ export function r2ExtractGlobals(
   const ch = new Channel<R2ExtractEvent>();
   ch.onmessage = onEvent;
   return invoke<void>("r2_extract_globals", { usrdir, onEvent: ch });
+}
+
+/** Extract every `data/patch_NN.psarc` (DLC content) into the USRDIR. After
+ *  this completes, DLC MP maps appear in `r2ListMaps()` output (e.g.
+ *  `lumber_yard_multiplayer`, `twin_falls_multiplayer`), the DLC overlay
+ *  is aliased as a `dlc_overlay` level, and the patched
+ *  `data/configs/comp_outfitter.csv` (containing Rachel / Grim / Malikov /
+ *  Cloven / Ravager / Ranger2 / Blackops2 / FemaleSoldier / etc. bangle
+ *  rows) is in place for the outfitter-name parser. Idempotent — re-runs
+ *  skip patches that already wrote their `data/.<stem>.extracted`
+ *  sentinel. No-op when no `data/patch_*.psarc` files exist. */
+export function r2ExtractPatches(
+  usrdir: string,
+  onEvent: (e: R2ExtractEvent) => void,
+): Promise<void> {
+  const ch = new Channel<R2ExtractEvent>();
+  ch.onmessage = onEvent;
+  return invoke<void>("r2_extract_patches", { usrdir, onEvent: ch });
 }
 
 /** Pre-extract step for RFOM — unpacks any `.psarc` sitting at the

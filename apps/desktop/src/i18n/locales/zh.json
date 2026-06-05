@@ -49,6 +49,7 @@
     "openLevel": "打开关卡…",
     "closeLevel": "关闭关卡",
     "extractPsarc": "提取 PSARC…",
+    "extractAssetLookup": "提取资产查找表…",
     "view": "视图",
     "grid": "网格",
     "axes": "坐标轴",
@@ -117,7 +118,7 @@
     "phase_ufrags": "地形",
     "phase_textures": "贴图",
     "warning": "繁重解码 — 窗口可能短暂卡住。不要关闭应用,它在后台继续工作,当前阶段完成后会恢复。",
-    "hint": "每次打开关卡运行一次。下次打开此关卡会快得多。"
+    "hint": "正在解码源 .dat 文件。运行期间请勿关闭应用。"
   },
   "cacheModal": {
     "title": "正在生成关卡缓存",
@@ -125,7 +126,7 @@
     "phase_mobys": "Mobys",
     "phase_ties": "Ties",
     "phase_textures": "贴图",
-    "hint": "这会在后台运行。不要关闭应用 — 下次打开此关卡时会立即就绪。"
+    "hint": "正在后台构建本地缓存。完成前请勿关闭应用。"
   },
   "cachePrompt": {
     "titleFound": "找到缓存的关卡数据",

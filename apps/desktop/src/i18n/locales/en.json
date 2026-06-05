@@ -62,6 +62,7 @@
     "openLevel": "Open Level…",
     "closeLevel": "Close Level",
     "extractPsarc": "Extract PSARC…",
+    "extractAssetLookup": "Extract asset lookup…",
     "view": "View",
     "grid": "Grid",
     "axes": "Axes",
@@ -130,7 +131,7 @@
     "phase_ufrags": "Terrain",
     "phase_textures": "Textures",
     "warning": "Heavy decoding — the window may briefly freeze. Don't close the app; it keeps working in the background and will return when the current phase finishes.",
-    "hint": "This runs once per level open. The next time you open this level it will be much faster."
+    "hint": "Decoding source .dat files. Don't close the app while this is running."
   },
   "cacheModal": {
     "title": "Building level cache",
@@ -141,7 +142,7 @@
     "phase_normalmaps": "Normal maps",
     "phase_animations": "Animations",
     "phase_textures": "Textures",
-    "hint": "This runs in the background. Don't close the app — the next time you open this level it will be ready instantly."
+    "hint": "Building the local cache in the background. Don't close the app until it finishes."
   },
   "cachePrompt": {
     "titleFound": "Cached level data found",

@@ -11,6 +11,7 @@ import { Bounds, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
+  Bone,
   Download,
   Eye,
   EyeOff,
@@ -281,6 +282,33 @@ function AnimRig({ scene, clip, isPlaying, onFrame, seekRef }: AnimRigProps) {
   return null;
 }
 
+function SkeletonView({
+  scene,
+  visible,
+}: {
+  scene: THREE.Group;
+  visible: boolean;
+}) {
+  const helper = useMemo(() => {
+    const h = new THREE.SkeletonHelper(scene);
+    const mat = h.material as THREE.LineBasicMaterial;
+    mat.color.set(0x00ff88);
+    mat.depthTest = false;
+    mat.transparent = true;
+    mat.opacity = 0.9;
+    h.renderOrder = 999;
+    return h;
+  }, [scene]);
+  useEffect(() => {
+    return () => {
+      helper.geometry.dispose();
+      (helper.material as THREE.LineBasicMaterial).dispose();
+    };
+  }, [helper]);
+  helper.visible = visible;
+  return <primitive object={helper} />;
+}
+
 export function AssetWorkbench({
   instance,
   cacheFolder,
@@ -300,6 +328,8 @@ export function AssetWorkbench({
   const [duration, setDuration] = useState(0);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const seekRef = useRef<((seconds: number) => void) | null>(null);
+  const [showBones, setShowBones] = useState(false);
+  const [hoveredUuid, setHoveredUuid] = useState<string | null>(null);
 
   const assetTuidHex = useMemo(() => {
     if (overrideAsset) return overrideAsset.tuid;
@@ -378,11 +408,12 @@ export function AssetWorkbench({
     };
   }, [loaded]);
 
-  const toggleMesh = useCallback((uuid: string) => {
+  const setMeshHidden = useCallback((uuid: string, hidden: boolean) => {
     setHidden((prev) => {
+      if (hidden === prev.has(uuid)) return prev;
       const next = new Set(prev);
-      if (next.has(uuid)) next.delete(uuid);
-      else next.add(uuid);
+      if (hidden) next.add(uuid);
+      else next.delete(uuid);
       return next;
     });
   }, []);
@@ -395,6 +426,42 @@ export function AssetWorkbench({
       }
     });
   }, [loaded, hidden]);
+
+  const hasBones = useMemo(() => {
+    if (!loaded) return false;
+    let found = false;
+    loaded.scene.traverse((o) => {
+      if ((o as THREE.Bone).isBone) found = true;
+    });
+    return found;
+  }, [loaded]);
+
+  useEffect(() => {
+    if (!loaded || !hoveredUuid) return;
+    const obj = loaded.scene.getObjectByProperty("uuid", hoveredUuid) as
+      | THREE.Mesh
+      | undefined;
+    if (!obj || !(obj as THREE.Mesh).isMesh) return;
+    const original = obj.material;
+    const highlight = (m: THREE.Material): THREE.Material => {
+      const c = m.clone();
+      const std = c as THREE.MeshStandardMaterial;
+      if (std.isMeshStandardMaterial) {
+        std.emissive = new THREE.Color(0x33ddff);
+        std.emissiveIntensity = 1.0;
+      }
+      return c;
+    };
+    const swapped = Array.isArray(original)
+      ? original.map(highlight)
+      : highlight(original);
+    obj.material = swapped;
+    return () => {
+      obj.material = original;
+      if (Array.isArray(swapped)) swapped.forEach((m) => m.dispose());
+      else swapped.dispose();
+    };
+  }, [loaded, hoveredUuid]);
 
   const activeClip = useMemo(() => {
     if (!loaded || activeClipIndex == null) return null;
@@ -501,7 +568,9 @@ export function AssetWorkbench({
                 <SubmeshList
                   meshes={loaded.meshes}
                   hidden={hidden}
-                  onToggle={toggleMesh}
+                  onSetHidden={setMeshHidden}
+                  hoveredUuid={hoveredUuid}
+                  onHover={setHoveredUuid}
                 />
               )}
               {!loading && !error && loaded && drawerTab === "textures" && (
@@ -536,6 +605,9 @@ export function AssetWorkbench({
               <primitive object={loaded.scene} />
             </Bounds>
           )}
+          {loaded && hasBones && (
+            <SkeletonView scene={loaded.scene} visible={showBones} />
+          )}
           {loaded && (
             <AnimRig
               scene={loaded.scene}
@@ -547,6 +619,31 @@ export function AssetWorkbench({
           )}
           <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
         </Canvas>
+
+        <div className="aw-overlay mono small">
+          <span className="aw-overlay-model">
+            {instance?.name ?? assetTuidHex}
+          </span>
+          <span className="aw-overlay-clip dim">
+            {activeClip ? activeClip.name : "rest pose"}
+          </span>
+        </div>
+
+        {hasBones && (
+          <div className="aw-view-controls">
+            <button
+              type="button"
+              className={`aw-view-btn ${showBones ? "active" : ""}`}
+              onClick={() => setShowBones((v) => !v)}
+              aria-pressed={showBones}
+              title={showBones ? "Hide skeleton" : "Show skeleton"}
+              aria-label={showBones ? "Hide skeleton" : "Show skeleton"}
+            >
+              <Bone size={14} />
+            </button>
+          </div>
+        )}
+
 
         <div className="aw-export-wrap">
           <Button
@@ -666,27 +763,73 @@ function DrawerTabButton({
 function SubmeshList({
   meshes,
   hidden,
-  onToggle,
+  onSetHidden,
+  hoveredUuid,
+  onHover,
 }: {
   meshes: MeshEntry[];
   hidden: Set<string>;
-  onToggle: (uuid: string) => void;
+  onSetHidden: (uuid: string, hidden: boolean) => void;
+  hoveredUuid: string | null;
+  onHover: (uuid: string | null) => void;
 }): ReactNode {
+  const dragTargetRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    const endDrag = () => {
+      dragTargetRef.current = null;
+    };
+    window.addEventListener("mouseup", endDrag);
+    window.addEventListener("mouseleave", endDrag);
+    return () => {
+      window.removeEventListener("mouseup", endDrag);
+      window.removeEventListener("mouseleave", endDrag);
+    };
+  }, []);
+
   if (meshes.length === 0) {
     return <div className="aw-status small dim">—</div>;
   }
+
+  const onEyeMouseDown = (uuid: string, isHidden: boolean) => (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const target = !isHidden;
+    dragTargetRef.current = target;
+    onSetHidden(uuid, target);
+  };
+
+  const onEyeMouseEnter = (uuid: string, isHidden: boolean) => () => {
+    const target = dragTargetRef.current;
+    if (target == null) return;
+    if (isHidden === target) return;
+    onSetHidden(uuid, target);
+  };
+
   return (
-    <ul className="aw-list">
+    <ul className="aw-list" onDragStart={(e) => e.preventDefault()}>
       {meshes.map((m, i) => {
         const isHidden = hidden.has(m.uuid);
         return (
-          <li key={m.uuid} className={`aw-row ${isHidden ? "hidden" : ""}`}>
+          <li
+            key={m.uuid}
+            className={`aw-row ${isHidden ? "hidden" : ""} ${m.uuid === hoveredUuid ? "is-hover" : ""}`}
+            onMouseEnter={() => onHover(m.uuid)}
+            onMouseLeave={() => onHover(null)}
+          >
             <button
               type="button"
               className="aw-eye"
-              onClick={() => onToggle(m.uuid)}
+              onMouseDown={onEyeMouseDown(m.uuid, isHidden)}
+              onMouseEnter={onEyeMouseEnter(m.uuid, isHidden)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSetHidden(m.uuid, !isHidden);
+                }
+              }}
               aria-label={isHidden ? "Show" : "Hide"}
-              title={isHidden ? "Show" : "Hide"}
+              title={isHidden ? "Show (drag to paint)" : "Hide (drag to paint)"}
             >
               {isHidden ? <EyeOff size={12} /> : <Eye size={12} />}
             </button>
@@ -770,16 +913,16 @@ function AnimationList({
           >
             <button
               type="button"
-              className="aw-anim-pick"
+              className="aw-anim-row-btn"
               onClick={() => onPick(i)}
-              title="Play"
+              aria-pressed={active}
+              title={clip.name || `clip_${i}`}
             >
-              <Play size={11} />
+              <span className="aw-row-label small mono">{clip.name || `clip_${i}`}</span>
+              <span className="aw-row-meta small dim mono">
+                {clip.duration.toFixed(2)}s
+              </span>
             </button>
-            <span className="aw-row-label small mono">{clip.name || `clip_${i}`}</span>
-            <span className="aw-row-meta small dim mono">
-              {clip.duration.toFixed(2)}s
-            </span>
           </li>
         );
       })}

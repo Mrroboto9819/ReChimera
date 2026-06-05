@@ -374,6 +374,33 @@ pub fn find_sibling_extracted_levels(level_folder: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// Find the DLC patch overlay for this USRDIR, if one exists. After
+/// `r2_extract_patches` runs, `<usrdir>/built/patch/` holds an
+/// assetlookup-shaped folder with DLC-only mobys + textures + shaders
+/// (Rachel head, Female Soldier head, Grim body, Ravager body, …).
+///
+/// Walks up from `level_folder` (which is typically
+/// `.../packed/levels/<map>/built/levels/<map>/`) toward the USRDIR
+/// root, looking for `built/patch/textures.dat` as the existence
+/// signature. Returns the patch overlay folder itself (not the
+/// USRDIR), which is what `bulk_extract_pngs` expects.
+///
+/// Returns `None` for installs without DLC patches (most disc dumps)
+/// or installs where `r2_extract_patches` hasn't been run yet — both
+/// are normal states; absence must not block the cache build.
+pub fn find_patch_overlay(level_folder: &Path) -> Option<PathBuf> {
+    let mut cur = level_folder.parent();
+    for _ in 0..10 {
+        let Some(p) = cur else { break };
+        let candidate = p.join("built").join("patch");
+        if candidate.join("textures.dat").is_file() {
+            return Some(candidate);
+        }
+        cur = p.parent();
+    }
+    None
+}
+
 /// Verify the suspected texture in this folder really is the one with id
 /// `expected_low_32`. Reads the `TextureResource` (id `0x5A00`) which
 /// stores `{ uint32 hash; uint32 totalSize; }` — `hash` should match the

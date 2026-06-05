@@ -117,8 +117,8 @@ export function buildSkinnedAsset(
       
       
       name: `slots_a${s.albedo_id ?? "_"}_n${s.normal_id ?? "_"}_e${s.emissive_id ?? "_"}`,
-      emissive: s.emissive_id != null ? 0xffffff : 0x000000,
-      emissiveIntensity: s.emissive_id != null ? 0.7 : 0,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
     });
     materials.push(mat);
     geometries.push(geom);

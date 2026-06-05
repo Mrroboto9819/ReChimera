@@ -49,6 +49,7 @@
     "openLevel": "Abrir nivel…",
     "closeLevel": "Cerrar nivel",
     "extractPsarc": "Extraer PSARC…",
+    "extractAssetLookup": "Extraer asset lookup…",
     "view": "Vista",
     "grid": "Cuadrícula",
     "axes": "Ejes",
@@ -117,7 +118,7 @@
     "phase_ufrags": "Terreno",
     "phase_textures": "Texturas",
     "warning": "Decodificación pesada — la ventana puede congelarse brevemente. No cierres la app; sigue trabajando en segundo plano y volverá cuando la fase actual termine.",
-    "hint": "Esto se ejecuta una vez por apertura de nivel. La próxima vez será mucho más rápido."
+    "hint": "Decodificando los archivos .dat. No cierres la app mientras esto se ejecuta."
   },
   "cacheModal": {
     "title": "Generando caché del nivel",
@@ -125,7 +126,7 @@
     "phase_mobys": "Mobys",
     "phase_ties": "Ties",
     "phase_textures": "Texturas",
-    "hint": "Esto se ejecuta en segundo plano. No cierres la app — la próxima vez que abras este nivel cargará al instante."
+    "hint": "Construyendo la caché local en segundo plano. No cierres la app hasta que termine."
   },
   "cachePrompt": {
     "titleFound": "Datos de nivel en caché encontrados",

@@ -1548,6 +1548,151 @@ fn run_psarc_extract(
 }
 
 
+#[derive(Serialize)]
+struct AssetLookupKindDto {
+    name: String,
+    section_id: u32,
+    count: usize,
+    has_decoder: bool,
+}
+
+#[derive(Serialize)]
+struct AssetLookupOverviewDto {
+    layout: String,
+    version_major: u16,
+    version_minor: u16,
+    kinds: Vec<AssetLookupKindDto>,
+}
+
+#[tauri::command]
+fn asset_lookup_inspect(path: String) -> Result<AssetLookupOverviewDto, String> {
+    let overview = lunalib::inspect_assetlookup(Path::new(&path)).map_err(|e| e.to_string())?;
+    Ok(AssetLookupOverviewDto {
+        layout: overview.layout.to_string(),
+        version_major: overview.version_major,
+        version_minor: overview.version_minor,
+        kinds: overview
+            .kinds
+            .into_iter()
+            .map(|k| AssetLookupKindDto {
+                name: k.name.to_string(),
+                section_id: k.section_id,
+                count: k.count,
+                has_decoder: k.has_decoder,
+            })
+            .collect(),
+    })
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AssetLookupExtractEvent {
+    Total { kind: String, count: usize },
+    Entry {
+        kind: String,
+        index: usize,
+        tuid: String,
+        ok: bool,
+        message: Option<String>,
+    },
+    KindDone { kind: String },
+    Done,
+    Error { message: String },
+}
+
+#[tauri::command]
+fn asset_lookup_extract_stream(
+    input: String,
+    output: String,
+    kinds: Vec<String>,
+    max_texture_dim: Option<u32>,
+    on_event: Channel<AssetLookupExtractEvent>,
+) -> Result<(), String> {
+    if let Err(message) =
+        run_asset_lookup_extract(&input, &output, &kinds, max_texture_dim, &on_event)
+    {
+        let _ = on_event.send(AssetLookupExtractEvent::Error {
+            message: message.clone(),
+        });
+        return Err(message);
+    }
+    let _ = on_event.send(AssetLookupExtractEvent::Done);
+    Ok(())
+}
+
+fn run_asset_lookup_extract(
+    input: &str,
+    output: &str,
+    kind_names: &[String],
+    max_texture_dim: Option<u32>,
+    on_event: &Channel<AssetLookupExtractEvent>,
+) -> Result<(), String> {
+    let input_path = Path::new(input);
+    let output_path = Path::new(output);
+
+    let kinds = parse_asset_kinds(kind_names)?;
+    if kinds.is_empty() {
+        return Err("no asset kinds selected".to_string());
+    }
+
+    std::fs::create_dir_all(output_path).map_err(|e| format!("create out dir: {e}"))?;
+
+    let options = lunalib::ExtractOptions {
+        kinds,
+        max_texture_dim: max_texture_dim.unwrap_or(4096),
+    };
+
+    let on_event_cl = on_event.clone();
+    lunalib::extract_assetlookup(input_path, output_path, &options, move |ev| match ev {
+        lunalib::ExtractEvent::Total { kind, count } => {
+            let _ = on_event_cl.send(AssetLookupExtractEvent::Total {
+                kind: kind.name().to_string(),
+                count,
+            });
+        }
+        lunalib::ExtractEvent::Entry { kind, index, tuid, ok, message } => {
+            let _ = on_event_cl.send(AssetLookupExtractEvent::Entry {
+                kind: kind.name().to_string(),
+                index,
+                tuid: format!("0x{:016X}", tuid),
+                ok,
+                message,
+            });
+        }
+        lunalib::ExtractEvent::KindDone { kind } => {
+            let _ = on_event_cl.send(AssetLookupExtractEvent::KindDone {
+                kind: kind.name().to_string(),
+            });
+        }
+    })
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+fn parse_asset_kinds(names: &[String]) -> Result<Vec<lunalib::AssetKind>, String> {
+    let mut out = Vec::with_capacity(names.len());
+    for name in names {
+        let kind = match name.as_str() {
+            "shader" => lunalib::AssetKind::Shader,
+            "texture" => lunalib::AssetKind::Texture,
+            "highmip" => lunalib::AssetKind::HighMip,
+            "cubemap" => lunalib::AssetKind::Cubemap,
+            "tie" => lunalib::AssetKind::Tie,
+            "foliage" => lunalib::AssetKind::Foliage,
+            "shrub" => lunalib::AssetKind::Shrub,
+            "moby" => lunalib::AssetKind::Moby,
+            "animset" => lunalib::AssetKind::Animset,
+            "cinematic" => lunalib::AssetKind::Cinematic,
+            "zone" => lunalib::AssetKind::Zone,
+            "lighting" => lunalib::AssetKind::Lighting,
+            other => return Err(format!("unknown asset kind: {other}")),
+        };
+        out.push(kind);
+    }
+    Ok(out)
+}
+
 fn write_bytes_to_path(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     #[cfg(windows)]
     {
@@ -3005,15 +3150,69 @@ fn list_level_files(level_folder: String) -> Result<Vec<LevelFileDto>, String> {
     Ok(out)
 }
 
+/// Walk up from the current working directory (and the executable's
+/// directory) looking for a `.env` file. Loads the first one found via
+/// `dotenvy::from_path`. Returns the loaded path on success.
+///
+/// Why this exists: `dotenvy::dotenv()` only checks CWD. Tauri's dev
+/// command sets CWD to `apps/desktop/`, but our canonical `.env` is at
+/// the workspace root. Without walk-up, debug env vars never reach the
+/// decoders and `[skel-dump]` / `[anim-detail]` diagnostics silently
+/// vanish from logs.
+fn load_env_walking_up() -> Result<std::path::PathBuf, dotenvy::Error> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+    for start in roots {
+        let mut cursor: Option<&std::path::Path> = Some(start.as_path());
+        for _ in 0..12 {
+            let Some(dir) = cursor else { break };
+            let candidate = dir.join(".env");
+            if candidate.is_file() {
+                dotenvy::from_path(&candidate)?;
+                return Ok(candidate);
+            }
+            cursor = dir.parent();
+        }
+    }
+    Err(dotenvy::Error::Io(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        ".env not found in CWD or any parent directory",
+    )))
+}
+
 fn main() {
 
-    let dotenv_result = dotenvy::dotenv();
+    // Why: `dotenvy::dotenv()` only checks the current working directory,
+    // which under `bun run tauri dev` is `apps/desktop/` — NOT the workspace
+    // root where the canonical `.env` lives. Walk up from CWD (and from the
+    // executable's directory in prod builds) so debug env vars set in the
+    // workspace-root `.env` actually reach the lunalib decoders. Stops at
+    // the first hit so a per-app `.env` can still override.
+    let dotenv_result = load_env_walking_up();
 
 
     eprintln!("─── ReChimera startup ───");
-    match dotenv_result {
+    match &dotenv_result {
         Ok(path) => eprintln!("  .env loaded from: {}", path.display()),
         Err(_) => eprintln!("  .env: not found (using process environment only)"),
+    }
+    for var in [
+        "RECHIMERA_DEBUG_MOBY",
+        "RECHIMERA_LOG_ANIM_DETAIL",
+        "RECHIMERA_LOG_WEIGHTS",
+        "RECHIMERA_LOG_PROBES",
+        "RECHIMERA_LOG_SHADER_SLOTS",
+    ] {
+        if let Ok(val) = std::env::var(var) {
+            eprintln!("  {var}={val}");
+        }
     }
 
     eprintln!("─────────────────────────");
@@ -3071,10 +3270,13 @@ fn main() {
             list_level_files,
             psarc_list,
             psarc_extract_stream,
+            asset_lookup_inspect,
+            asset_lookup_extract_stream,
             write_bytes,
             r2::r2_setup_check,
             r2::r2_list_maps,
             r2::r2_extract_globals,
+            r2::r2_extract_patches,
             r2::r2_extract_root_psarcs,
             r2::r2_extract_level,
             r2::r2_level_open_path,

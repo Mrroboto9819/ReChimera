@@ -313,7 +313,7 @@ export function GltfCharacterModal({
               else if (channel === "emissive_path") {
                 m.emissiveMap = tex;
                 m.emissive = new THREE.Color(0xffffff);
-                m.emissiveIntensity = 0.7;
+                m.emissiveIntensity = 0.15;
               }
               m.needsUpdate = true;
             }

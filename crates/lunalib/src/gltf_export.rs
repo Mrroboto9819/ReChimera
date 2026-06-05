@@ -81,6 +81,7 @@ pub fn append_moby_to_doc(
     shaders: &HashMap<u64, ShaderInfo>,
     textures: &HashMap<u32, Vec<u8>>,
     placement: Option<([f32; 3], [f32; 4], [f32; 3])>,
+    split_submeshes: bool,
 ) -> Result<u32> {
     let asset_root_idx = doc.nodes.len() as u32;
     let (translation, rotation, scale) = placement.unwrap_or(([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]));
@@ -136,7 +137,7 @@ pub fn append_moby_to_doc(
         }
         let mut primitives: Vec<Primitive> = Vec::with_capacity(bangle.meshes.len());
         let mut bangle_has_skin = false;
-        for mesh in &bangle.meshes {
+        for (mi, mesh) in bangle.meshes.iter().enumerate() {
             let material_idx = build_material(
                 &mut doc.bin,
                 &mut doc.buffer_views,
@@ -149,24 +150,61 @@ pub fn append_moby_to_doc(
                 textures,
                 mesh.shader_index as usize,
             );
-            if let Some(prim) = push_submesh(
+            let prim = match push_submesh(
                 &mut doc.bin,
                 &mut doc.accessors,
                 &mut doc.buffer_views,
                 mesh,
                 skin_idx.is_some(),
+                bone_count,
                 material_idx,
             )? {
-                if prim
-                    .attributes
-                    .contains_key(&Checked::Valid(Semantic::Joints(0)))
-                {
+                Some(prim) => prim,
+                None => continue,
+            };
+            let prim_has_skin = prim
+                .attributes
+                .contains_key(&Checked::Valid(Semantic::Joints(0)));
+
+            if split_submeshes {
+                total_primitives += 1;
+                let name = format!("{}_Mesh_{bi}_{mi}", asset_display_name(asset));
+                let mesh_idx = doc.meshes.len() as u32;
+                doc.meshes.push(gltf_json::Mesh {
+                    extensions: Default::default(),
+                    extras: Default::default(),
+                    name: Some(name.clone()),
+                    primitives: vec![prim],
+                    weights: None,
+                });
+                let node_idx = doc.nodes.len() as u32;
+                doc.nodes.push(gltf_json::Node {
+                    camera: None,
+                    children: None,
+                    extensions: Default::default(),
+                    extras: Default::default(),
+                    matrix: None,
+                    mesh: Some(Index::new(mesh_idx)),
+                    name: Some(name),
+                    rotation: None,
+                    scale: None,
+                    translation: None,
+                    skin: if prim_has_skin && skin_idx.is_some() {
+                        Some(Index::new(skin_idx.unwrap()))
+                    } else {
+                        None
+                    },
+                    weights: None,
+                });
+                bangle_node_indices.push(node_idx);
+            } else {
+                if prim_has_skin {
                     bangle_has_skin = true;
                 }
                 primitives.push(prim);
             }
         }
-        if primitives.is_empty() {
+        if split_submeshes || primitives.is_empty() {
             continue;
         }
         total_primitives += primitives.len();
@@ -240,7 +278,7 @@ pub fn write_moby_glb_full(
     textures: &HashMap<u32, Vec<u8>>,
 ) -> Result<Vec<u8>> {
     let mut doc = GltfDocBuilder::new();
-    let asset_root_idx = append_moby_to_doc(&mut doc, asset, clips, shaders, textures, None)?;
+    let asset_root_idx = append_moby_to_doc(&mut doc, asset, clips, shaders, textures, None, true)?;
 
     while doc.bin.len() % 4 != 0 {
         doc.bin.push(0);
@@ -462,6 +500,7 @@ fn push_submesh(
     views: &mut Vec<gltf_json::buffer::View>,
     mesh: &MobyMesh,
     skinned: bool,
+    bone_count: usize,
     material_idx: Option<u32>,
 ) -> Result<Option<Primitive>> {
     use std::collections::BTreeMap;
@@ -543,7 +582,7 @@ fn push_submesh(
         }
 
         let joints_bytes = if real_skin {
-            joints_u8_bytes(&mesh.bone_indices, vertex_count)
+            joints_u8_bytes(&mesh.bone_indices, vertex_count, bone_count)
         } else {
             vec![0u8; vertex_count * 4]
         };
@@ -799,13 +838,31 @@ fn indices_to_bytes(indices: &[u32]) -> Vec<u8> {
     out
 }
 
-fn joints_u8_bytes(indices: &[u16], vertex_count: usize) -> Vec<u8> {
+fn joints_u8_bytes(indices: &[u16], vertex_count: usize, bone_count: usize) -> Vec<u8> {
+    let max_bone = if bone_count == 0 {
+        0
+    } else {
+        (bone_count - 1).min(255) as u16
+    };
     let mut out = Vec::with_capacity(vertex_count * 4);
+    let mut oob = 0usize;
     for i in 0..vertex_count {
         for k in 0..4 {
             let v = indices.get(i * 4 + k).copied().unwrap_or(0);
-            out.push(v.min(255) as u8);
+            if v > max_bone {
+                oob += 1;
+                out.push(max_bone as u8);
+            } else {
+                out.push(v as u8);
+            }
         }
+    }
+    if oob > 0 && std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
+        eprintln!(
+            "warn: [glb-skin] clamped {} joint indices >= bone_count ({}) to {}; \
+             likely missing per-bangle bone remap or wrong sub-skeleton",
+            oob, bone_count, max_bone,
+        );
     }
     out
 }

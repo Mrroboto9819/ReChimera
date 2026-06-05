@@ -49,6 +49,7 @@
     "openLevel": "Ouvrir un niveau…",
     "closeLevel": "Fermer le niveau",
     "extractPsarc": "Extraire PSARC…",
+    "extractAssetLookup": "Extraire l’asset lookup…",
     "view": "Affichage",
     "grid": "Grille",
     "axes": "Axes",
@@ -117,7 +118,7 @@
     "phase_ufrags": "Terrain",
     "phase_textures": "Textures",
     "warning": "Décodage intensif — la fenêtre peut se figer brièvement. Ne fermez pas l'application ; elle continue en arrière-plan et reviendra à la fin de la phase actuelle.",
-    "hint": "S'exécute une fois par ouverture de niveau. Les prochaines fois seront beaucoup plus rapides."
+    "hint": "Décodage des fichiers .dat source. Ne fermez pas l'application pendant cette opération."
   },
   "cacheModal": {
     "title": "Génération du cache du niveau",
@@ -128,7 +129,7 @@
     "phase_normalmaps": "Normal maps",
     "phase_animations": "Animations",
     "phase_textures": "Textures",
-    "hint": "Cela s'exécute en arrière-plan. Ne fermez pas l'application — la prochaine ouverture sera instantanée."
+    "hint": "Construction du cache local en arrière-plan. Ne fermez pas l'application jusqu'à la fin."
   },
   "cachePrompt": {
     "titleFound": "Données de niveau en cache trouvées",

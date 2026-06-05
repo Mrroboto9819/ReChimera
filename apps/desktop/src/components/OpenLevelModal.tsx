@@ -17,7 +17,7 @@ interface OpenLevelModalProps {
   open: boolean;
   busy: boolean;
   onClose: () => void;
-  onOpen: (folderPath: string, opts?: { skipCachePrompt?: boolean }) => void;
+  onOpen: (folderPath: string, opts?: { skipCachePrompt?: boolean; game?: string }) => void;
 }
 
 type GameId = "r1" | "r2" | "r3" | "rc_tod" | "rc_acit" | "rc_ffa" | "rc_a4o";
@@ -60,7 +60,7 @@ const GAMES: GameSpec[] = [
     short: "RFOM",
     franchise: "resistance",
     supported: true,
-    logoSrc: "/RFOM.webp",
+    logoSrc: "/rfom.jpg",
     byline: "Full pipeline: meshes, textures, skeletons, animations, ufrags, ties, foliage, shrubs, details, cubemap, sounds, visemes.",
     entryFile: "ps3levelmain.dat",
     hint: "RFOM ships `game.psarc` archives — extract them first with PSARC tooling so you get the loose file tree (e.g. `extract_psarc.cmd` from the InsomniaToolset bundle, or any PSARC unpacker). Once unpacked, levels live in `<game>/PS3_GAME/USRDIR/packed/levels/<levelN>/`. Pick a folder that contains `ps3levelmain.dat` plus its siblings (`ps3leveltexs.dat`, `ps3levelverts.dat`, `ps3levelcoll.dat`, …). Note: some level folders (e.g. `level22`) only ship dialogue/sound and are NOT playable on their own.",
@@ -77,7 +77,7 @@ const GAMES: GameSpec[] = [
     short: "R2",
     franchise: "resistance",
     supported: true,
-    logoSrc: "/Resistance_2.webp",
+    logoSrc: "/r2.jpg",
     byline: "Stable end-to-end: meshes, textures, materials, skeletons, animations, ufrags, sounds (SFX / Dialog / Music).",
     entryFile: "assetlookup.dat",
     hint: "R2 levels are V2 layout — assetlookup.dat plus mobys.dat / ties.dat / shaders.dat / textures.dat / highmips.dat / animsets.dat / zones.dat side-by-side.",
@@ -94,7 +94,7 @@ const GAMES: GameSpec[] = [
     short: "R3",
     franchise: "resistance",
     supported: true,
-    logoSrc: "/Resistance_3.png",
+    logoSrc: "/r3.jpg",
     byline: "Stable end-to-end: meshes, textures, materials, skeletons, animations, ufrags, sounds (SFX / Dialog / Music).",
     entryFile: "assetlookup.dat",
     hint: "R3 levels are V2 layout — same sibling .dat set as R2.",
@@ -111,7 +111,7 @@ const GAMES: GameSpec[] = [
     short: "R&C ToD",
     franchise: "ratchet_clank",
     supported: true,
-    logoSrc: "/R&C_FTD.webp",
+    logoSrc: "/rc_tod.jpg",
     byline: "Meshes, textures, materials, skeletons, ufrags and tie instances load. Animations export in T-pose (complex frame format unsolved). No cubemap — no IT/ReLunacy reference.",
     entryFile: "main.dat",
     hint: "ToD levels are TOD layout — main.dat embeds asset tables, with vertices.dat / textures.dat / texstream.dat / system.tp / system.tph as siblings. There is no assetlookup.dat.",
@@ -128,7 +128,7 @@ const GAMES: GameSpec[] = [
     short: "R&C ACiT",
     franchise: "ratchet_clank",
     supported: true,
-    logoSrc: "/R&Clank_A_Crack_in_Time.png",
+    logoSrc: "/rc_acit.jpg",
     byline: "Experimental — ACiT ships V2 layout (assetlookup.dat) so it routes through the R2/R3 parser. Skeletons read via the shift-recovery cascade; meshes / textures / ties may have ACiT-specific quirks still being investigated.",
     entryFile: "assetlookup.dat",
     hint: "A Crack in Time levels ship `assetlookup.dat` plus the standard V2 sibling set (mobys.dat / ties.dat / shaders.dat / textures.dat / highmips.dat / animsets.dat / zones.dat). Pick the folder that contains them. Some assets may not render correctly yet — please share the cache-build log if you hit issues.",
@@ -162,7 +162,7 @@ const GAMES: GameSpec[] = [
     short: "R&C A4O",
     franchise: "ratchet_clank",
     supported: true,
-    logoSrc: "/maxresdefault.jpg",
+    logoSrc: "/rc_a4.jpg",
     byline: "V2 layout. Meshes, textures, materials, skeletons, animations and sounds all working.",
     entryFile: "assetlookup.dat",
     hint: "All 4 One levels use V2 layout — assetlookup.dat plus mobys.dat / ties.dat / shaders.dat / textures.dat / highmips.dat / animsets.dat / zones.dat side-by-side. Same as R2/R3/FFA.",
@@ -417,7 +417,7 @@ export function OpenLevelModal({
       if (game) {
         pushRecent(game, trimmed);
       }
-      onOpen(trimmed);
+      onOpen(trimmed, { game: GAMES.find((g) => g.id === game)?.short });
     },
     [onOpen, game],
   );
@@ -661,7 +661,7 @@ export function OpenLevelModal({
         }}
         onOpen={(folder, opts) => {
           pushRecent(game, folder);
-          onOpen(folder, opts);
+          onOpen(folder, { ...opts, game: wizardLabel });
         }}
       />
     );

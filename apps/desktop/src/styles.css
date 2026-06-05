@@ -332,6 +332,32 @@ textarea {
   align-self: center;
 }
 
+.open-level-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  margin: 0 6px;
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  user-select: none;
+  max-width: 320px;
+  overflow: hidden;
+}
+.open-level-badge-game {
+  color: var(--brand-fixed, #ffb454);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.open-level-badge-map {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 
 
 .about-modal {
@@ -3418,6 +3444,35 @@ textarea {
   border-radius: var(--r-1);
   overflow: hidden;
   background: var(--bg-2);
+  /* Subtle border + cursor hint so users know the preview is interactive
+   * (drag to orbit, scroll to zoom). The border is invisible at rest so it
+   * doesn't compete with the model, then fades to the accent color on hover.
+   * `cursor: grab` -> `grabbing` covers the drag gesture. */
+  border: 1px solid transparent;
+  cursor: grab;
+  transition:
+    border-color 140ms ease-out,
+    box-shadow 140ms ease-out,
+    background 140ms ease-out;
+}
+.cache-library-canvas:hover {
+  border-color: var(--accent-blue, #55b3ff);
+  box-shadow:
+    0 0 0 1px rgba(85, 179, 255, 0.18) inset,
+    0 4px 18px rgba(0, 0, 0, 0.35);
+  background: var(--bg-1);
+}
+.cache-library-canvas:active,
+.cache-library-canvas.is-dragging {
+  cursor: grabbing;
+}
+/* Resistance 2 / HUD skin override — amber instead of blue so the hover
+ * stays inside the skin's visual language. */
+:root[data-app-skin="resistance2"] .cache-library-canvas:hover {
+  border-color: var(--hud-amber, #f4a93d);
+  box-shadow:
+    0 0 0 1px rgba(244, 169, 61, 0.20) inset,
+    0 4px 18px rgba(0, 0, 0, 0.45);
 }
 
 .cache-texture-preview {
@@ -5607,6 +5662,31 @@ textarea {
   width: 100%;
   height: 100%;
 }
+.glb-preview-overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+  background: rgba(7, 8, 10, 0.7);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--text-2);
+  max-width: calc(100% - 16px);
+  pointer-events: none;
+}
+.glb-preview-overlay-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glb-preview-overlay-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .glb-preview-burger {
   position: relative;
   display: inline-flex;
@@ -6794,6 +6874,18 @@ textarea {
   justify-content: space-between;
   gap: 10px;
 }
+.r2-reextract-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.r2-reextract-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
 .r2-maps-search {
   flex: 1;
   max-width: 320px;
@@ -7246,7 +7338,10 @@ textarea {
   display: flex;
   gap: 0;
   border-bottom: 1px solid var(--hud-rule);
-  padding: 0 20px;
+  /* No horizontal padding — the first tab's left edge should align with
+   * the toolbar (search field) above and the map grid below, so the
+   * visual column stays consistent down the entire panel. */
+  padding: 0;
   background: transparent;
 }
 .r2-hud-tab {
@@ -7254,6 +7349,9 @@ textarea {
   border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
+  /* First tab carries no left padding so its label edge aligns with the
+   * toolbar content; subsequent tabs space themselves via their own
+   * horizontal padding. */
   padding: 10px 16px;
   color: var(--hud-text-dim);
   font-size: 11px;
@@ -7262,6 +7360,9 @@ textarea {
   cursor: pointer;
   font-weight: 500;
   transition: color 100ms ease-out, border-color 100ms ease-out;
+}
+.r2-hud-tab:first-child {
+  padding-left: 0;
 }
 .r2-hud-tab:hover {
   color: var(--hud-text);
@@ -8958,6 +9059,27 @@ textarea {
   text-decoration: line-through;
 }
 .aw-eye,
+.aw-anim-row-btn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+.aw-anim-row-btn:hover .aw-row-label {
+  color: var(--text);
+}
+.aw-anim-row-btn:focus-visible {
+  outline: 1px solid var(--brand-color, #ff6363);
+  outline-offset: 1px;
+}
 .aw-anim-pick {
   appearance: none;
   background: transparent;
@@ -9118,6 +9240,69 @@ textarea {
 .aw-export-wrap .btn {
   backdrop-filter: blur(6px);
 }
+.aw-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-2);
+  max-width: 360px;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+.aw-overlay-model,
+.aw-overlay-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-view-controls {
+  position: absolute;
+  top: 52px;
+  right: 10px;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+}
+.aw-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--text-2);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition:
+    background 120ms ease-out,
+    color 120ms ease-out,
+    border-color 120ms ease-out;
+}
+.aw-view-btn:hover {
+  background: rgba(20, 24, 30, 0.75);
+  color: var(--text);
+}
+.aw-view-btn.active {
+  border-color: #00ff88;
+  color: #00ff88;
+  background: rgba(0, 255, 136, 0.12);
+}
+
+.aw-row.is-hover {
+  background: rgba(51, 153, 255, 0.16);
+  box-shadow: inset 2px 0 0 rgba(51, 153, 255, 0.7);
+}
 
 @keyframes r2BusyPulse {
   0%, 100% {
@@ -9195,4 +9380,46 @@ textarea {
 :root[data-app-skin="resistance2"] .r2-busy-banner-body strong {
   color: var(--hud-amber-strong);
   letter-spacing: 1.5px;
+}
+
+/* What's-new modal — alias the docs-modal markdown rules so the release-notes
+ * body inherits the same typography (headings, code, tables, blockquotes)
+ * without duplicating ~80 lines of CSS. */
+.whats-new-modal-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 70vh;
+}
+.whats-new-markdown {
+  flex: 1;
+  overflow: auto;
+  padding-right: 8px;
+  line-height: 1.55;
+}
+.whats-new-markdown h1,
+.whats-new-markdown h2,
+.whats-new-markdown h3 {
+  margin-top: 1.4em;
+  margin-bottom: 0.4em;
+  color: var(--text);
+}
+.whats-new-markdown h1 { font-size: 20px; }
+.whats-new-markdown h2 { font-size: 16px; }
+.whats-new-markdown h3 { font-size: 14px; }
+.whats-new-markdown p,
+.whats-new-markdown li {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.whats-new-markdown a {
+  color: var(--accent-blue);
+}
+.whats-new-markdown code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--hairline);
 }

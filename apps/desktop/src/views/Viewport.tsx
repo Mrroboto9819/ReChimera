@@ -59,8 +59,6 @@ const EMPTY_TEXTURE_BLOBS: TextureBlobMap = new Map();
 
 
 
-const EMISSIVE_TINT_WHITE = new THREE.Color(0xffffff);
-
 export type BooleanViewSetting = {
   [K in keyof ViewSettings]: ViewSettings[K] extends boolean ? K : never;
 }[keyof ViewSettings];
@@ -952,11 +950,8 @@ function AssetGroup({
     m = new THREE.MeshStandardMaterial({
       map: albedo,
       normalMap: normal,
-      emissiveMap: emissive,
-      
-      
-      emissive: emissive ? 0xffffff : 0x000000,
-      emissiveIntensity: emissive ? 0.7 : 0,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
       color: 0xffffff,
       roughness: 0.85,
       metalness: 0,
@@ -1919,14 +1914,13 @@ function SkinnedSelectionOverlay({
       if (!sub) continue;
       const albedo = sub.albedo_id != null ? textures.get(sub.albedo_id) ?? null : null;
       const normal = sub.normal_id != null ? textures.get(sub.normal_id) ?? null : null;
-      const emissive = sub.emissive_id != null ? textures.get(sub.emissive_id) ?? null : null;
       let touched = false;
       if (albedo && mat.map !== albedo) { mat.map = albedo; touched = true; }
       if (normal && mat.normalMap !== normal) { mat.normalMap = normal; touched = true; }
-      if (emissive && mat.emissiveMap !== emissive) {
-        mat.emissiveMap = emissive;
-        mat.emissive = EMISSIVE_TINT_WHITE;
-        mat.emissiveIntensity = 0.7;
+      if (mat.emissiveMap || mat.emissiveIntensity !== 0) {
+        mat.emissiveMap = null;
+        mat.emissive = new THREE.Color(0x000000);
+        mat.emissiveIntensity = 0;
         touched = true;
       }
       if (touched) mat.needsUpdate = true;
@@ -2156,6 +2150,16 @@ export function Viewport({
   const [mapExportError, setMapExportError] = useState<string | null>(null);
   const [mapExportStatus, setMapExportStatus] = useState<string | null>(null);
   const orbitRef = useRef<OrbitControlsImpl>(null);
+
+  // Pick guard: suppress click → select while the user is dragging the
+  // camera, orbiting, or scrolling. Without this, finishing a drag over
+  // any mesh fires a synthetic click and yanks selection. Reset on
+  // pointerdown; flipped to dragged once the pointer travels more than
+  // PICK_DRAG_PX in any direction (or the gesture lasts longer than
+  // PICK_DRAG_MS); checked at the single onPick entry point.
+  const pickGuardRef = useRef({ downX: 0, downY: 0, downT: 0, dragged: false });
+  const PICK_DRAG_PX = 5;
+  const PICK_DRAG_MS = 250;
 
   // Count placements per kind so we can disable empty toggles + show
   // counts in the header. `ufrag` lives on `meshes.ufrag_meshes` and on
@@ -2398,13 +2402,13 @@ export function Viewport({
     }
   }, [levelFolder, mapExportPhase]);
 
-  const onPick = (inst: InstanceData, e: ThreeEvent<MouseEvent>) =>
-
-
-
-
-
+  const onPick = (inst: InstanceData, e: ThreeEvent<MouseEvent>) => {
+    const g = pickGuardRef.current;
+    if (g.dragged) return;
+    if (g.downT !== 0 && performance.now() - g.downT > PICK_DRAG_MS) return;
     selection.select(inst, clickMods(e.nativeEvent));
+  };
+
   const { center, extent } = useMemo(() => {
     function* positions(): Generator<[number, number, number]> {
       for (const i of instances) yield i.position;
@@ -2786,12 +2790,29 @@ export function Viewport({
         
         
         
+        onPointerDown={(e) => {
+          pickGuardRef.current = {
+            downX: e.clientX,
+            downY: e.clientY,
+            downT: performance.now(),
+            dragged: false,
+          };
+        }}
+        onPointerMove={(e) => {
+          const g = pickGuardRef.current;
+          if (g.downT === 0 || g.dragged) return;
+          const dx = e.clientX - g.downX;
+          const dy = e.clientY - g.downY;
+          if (Math.hypot(dx, dy) > PICK_DRAG_PX) g.dragged = true;
+        }}
+        onWheel={() => {
+          pickGuardRef.current.dragged = true;
+          pickGuardRef.current.downT = performance.now();
+        }}
         onPointerMissed={(e) => {
-          
-          
-          
-          
-          
+          const g = pickGuardRef.current;
+          if (g.dragged) return;
+          if (g.downT !== 0 && performance.now() - g.downT > PICK_DRAG_MS) return;
           selection.select(null, clickMods(e as MouseEvent));
         }}
       >
@@ -3011,6 +3032,9 @@ export function Viewport({
           panSpeed={1.2}
           target={center}
           maxDistance={extent * 3}
+          onStart={() => {
+            pickGuardRef.current.dragged = true;
+          }}
         />
         <CameraFocus
           primary={selection.primary}

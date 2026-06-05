@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lunalib::{
-    animation_section_offsets, decode_animation, decode_animation_with_skeleton, detect_layout,
+    animation_section_offsets, decode_animation, decode_animation_with_skel, AnimProfile, Game,
+    decode_animation_with_skeleton, detect_layout,
     read_animation_control, read_animation_header_at,
     read_moby_assets_with_total, read_shaders, read_tie_assets_with_total, read_zones, AssetKind,
     AssetLookup, DecodedClip, IgFile, LevelLayout, ShaderInfo, Skeleton, UFrag, Zone,
@@ -318,7 +319,9 @@ fn decode_clips_for_moby_inline(
     skeleton: &Skeleton,
     layout: LevelLayout,
     moby_tuid: u64,
+    profile: AnimProfile,
 ) -> Vec<DecodedClip> {
+    let _ = profile;
     if anim_offsets.is_empty() {
         return Vec::new();
     }
@@ -397,8 +400,11 @@ fn decode_clips_for_moby_inline(
                 header.frames_ptr
             );
         }
-        if skel_bones > 0 {
+        if header.is_additive() && skel_bones > 0 {
             header.num_bones = skel_bones;
+        }
+        if !matches!(layout, LevelLayout::Tod) {
+            header.apply_frame_stride_padding();
         }
         // TOD pair-frame encoding: each logical keyframe is stored as TWO
         // consecutive frame_stride rows — even-index = zero filler,
@@ -426,42 +432,59 @@ fn decode_clips_for_moby_inline(
             let n8_bytes = header.num_8bit_tracks as usize;
             let min_data = ((padded_i16 + n8_bytes) + 15) & !15;
             let stride_usize = header.frame_stride as usize;
-            // Pair-frame encoding only applies when (a) the disk stride
-            // equals the minimum data size AND (b) the anim has zero
-            // 8-bit delta tracks. Anims with n8 > 0 use the i8 delta
-            // tracks as their compression mechanism and store one real
-            // keyframe per disk frame regardless of stride/min_data ratio.
-            // RE'd from the [tod-anim] APPLIED/SKIPPED audit:
-            //   animate_spin (n8=0): pair-framed, smooth Y rotation in odd frames
-            //   pterodactyl_fly / wasp_idle / wasp_attack_full (n8 > 0):
-            //     NOT pair-framed; pair-frame transform produced distorted
-            //     bones radiating from origin.
-            // TOD animation decoding is disabled across the board until
-            // we RE the format properly. Neither IT nor ReLunacy supports
-            // TOD anims; our probes showed that pair-frame works for
-            // n8=0 anims but the n8>0 i8-delta encoding produces wild
-            // distortion. Rather than ship a mix of working + visibly
-            // broken anims, T-pose every TOD anim and surface bind-pose
-            // characters. Simple anims (animate_spin, doors, kerchu_roller_roll)
-            // can be re-enabled later by removing this guard once the
-            // full TOD decode path is solved.
-            if log_probes && should_log_tod_anim_decision(moby_tuid, &header.name) {
-                let kind = if min_data > 0
-                    && stride_usize == min_data
-                    && header.num_8bit_tracks == 0
-                {
-                    "n8=0 simple"
+            let is_simple_pair_frame = header.num_8bit_tracks == 0
+                && min_data > 0
+                && stride_usize == min_data;
+            if is_simple_pair_frame {
+                // n8=0 simple anims store every other disk frame as zero
+                // filler; real keyframes live at odd indices. Halve
+                // num_frames, double frame_stride, offset frames_ptr by
+                // one (original) stride so frame[0] lands on the first
+                // real keyframe. RE'd from `animate_spin` (smooth linear
+                // Y rotation across odd frames). See `project_tod_anim_format`
+                // memory.
+                let real_frames = header.num_frames / 2;
+                if real_frames >= 1 {
+                    header.frames_ptr = header.frames_ptr.saturating_add(header.frame_stride as u32);
+                    header.frame_stride = header.frame_stride.saturating_mul(2);
+                    header.num_frames = real_frames;
+                    header.frame_rate /= 2.0;
+                    if log_probes && should_log_tod_anim_decision(moby_tuid, &header.name) {
+                        eprintln!(
+                            "[tod-anim] PAIR    moby_{:04X} '{}' n16={} stride→{} frames→{} fps→{}",
+                            moby_tuid, header.name,
+                            header.num_16bit_tracks,
+                            header.frame_stride, header.num_frames, header.frame_rate,
+                        );
+                    }
+                    // Fall through to standard decode below.
                 } else {
-                    "n8>0 complex"
-                };
-                eprintln!(
-                    "[tod-anim] T-POSE   moby_{:04X} '{}' n16={} n8={} stride={} min_data={} ({}) → skip decode",
-                    moby_tuid, header.name,
-                    header.num_16bit_tracks, header.num_8bit_tracks,
-                    stride_usize, min_data, kind,
-                );
+                    if log_probes && should_log_tod_anim_decision(moby_tuid, &header.name) {
+                        eprintln!(
+                            "[tod-anim] T-POSE   moby_{:04X} '{}' n16={} (degenerate pair-frame: real_frames=0) → skip",
+                            moby_tuid, header.name, header.num_16bit_tracks,
+                        );
+                    }
+                    continue;
+                }
+            } else if header.num_8bit_tracks > 0 {
+                // Complex anims (n8 > 0): per-frame i8 delta encoding
+                // produces wild distortion when run through the standard
+                // decoder. No reference implementation in IT or ReLunacy.
+                // T-pose for now; revisit per `project_tod_anim_format`.
+                if log_probes && should_log_tod_anim_decision(moby_tuid, &header.name) {
+                    eprintln!(
+                        "[tod-anim] T-POSE   moby_{:04X} '{}' n16={} n8={} stride={} min_data={} (n8>0 complex) → skip decode",
+                        moby_tuid, header.name,
+                        header.num_16bit_tracks, header.num_8bit_tracks,
+                        stride_usize, min_data,
+                    );
+                }
+                continue;
             }
-            continue;
+            // n8=0 with stride > min_data: anim packs real keyframes into
+            // every disk frame already, no pair-frame transform needed.
+            // Fall through to standard decode.
         }
         let ctrl = match read_animation_control(&mut ig, &header) {
             Ok(c) => c,
@@ -554,6 +577,7 @@ fn decode_clips_for_moby_inline(
             }
         }
     }
+    compose_additive_overlays(&mut out, false);
     out
 }
 
@@ -565,6 +589,8 @@ fn decode_clips_for_moby(
     position_scale: f32,
     scale_scale: f32,
     skel_bones: u16,
+    skel: Option<&lunalib::skeleton::Skeleton>,
+    profile: AnimProfile,
 ) -> Vec<DecodedClip> {
     let Some(&(offset, length)) = index.by_hash.get(&animset_hash) else {
         return Vec::new();
@@ -677,7 +703,11 @@ fn decode_clips_for_moby(
             }
         }
 
-        match decode_animation(&mut ig, &header, &ctrl, position_scale, scale_scale) {
+        let decode_result = match skel {
+            Some(s) => decode_animation_with_skel(&mut ig, &header, &ctrl, position_scale, scale_scale, s, profile),
+            None => decode_animation(&mut ig, &header, &ctrl, position_scale, scale_scale),
+        };
+        match decode_result {
             Ok(clip) => {
                 if debug_this {
                     let animated_rot = clip.bones.iter().filter(|b| b.rotation_animated).count();
@@ -707,7 +737,133 @@ fn decode_clips_for_moby(
             }
         }
     }
+    compose_additive_overlays(&mut out, debug_this);
     out
+}
+
+/// Walks decoded clips and bakes the matching `*_idle_p` pose underneath every
+/// `*_fire_p` / `*_alt_fire_p` / `*_fire_cycle_p` overlay. See the memory
+/// [[r2-fire-p-additive-overlay-standalone-limit]] — R2 weapon recoils are
+/// runtime-additive deltas, and without idle as the base the un-kicked bones
+/// snap to skeleton bind (T-shape arms holding no rifle).
+fn compose_additive_overlays(clips: &mut Vec<DecodedClip>, _debug: bool) {
+    use std::collections::HashMap;
+    let force_all = std::env::var("RECHIMERA_COMPOSE_FORCE")
+        .map(|v| v.eq_ignore_ascii_case("all"))
+        .unwrap_or(false);
+    let name_to_idx: HashMap<String, usize> = clips
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.name.clone(), i))
+        .collect();
+    let fallback_idx = name_to_idx
+        .get("mp_stand_dle")
+        .or_else(|| name_to_idx.get("mp_stand_idle"))
+        .copied();
+    let mut pairs: Vec<(usize, Option<usize>, String, &'static str)> = Vec::new();
+    for (i, c) in clips.iter().enumerate() {
+        if let Some(base_name) = idle_base_for_overlay(&c.name) {
+            if let Some(&base_idx) = name_to_idx.get(&base_name) {
+                if base_idx != i {
+                    pairs.push((i, Some(base_idx), base_name, "weapon-idle"));
+                    continue;
+                }
+            }
+            if let Some(fb) = fallback_idx {
+                if fb != i {
+                    pairs.push((i, Some(fb), "mp_stand_dle".to_string(), "stand-dle fallback"));
+                    continue;
+                }
+            }
+            pairs.push((i, None, base_name, "none"));
+        }
+    }
+    if pairs.is_empty() {
+        return;
+    }
+    eprintln!(
+        "[anim-compose] scanning {} clips, {} overlay candidates (force_all={})",
+        clips.len(),
+        pairs.len(),
+        force_all
+    );
+    for (fire_idx, base_idx_opt, base_name, src) in pairs {
+        let fire_name = clips[fire_idx].name.clone();
+        let fire_nf = clips[fire_idx].num_frames;
+        match base_idx_opt {
+            Some(base_idx) => {
+                let base = clips[base_idx].clone();
+                let base_nf = base.num_frames;
+                if fire_name == "mp_carbine_fire_p"
+                    && std::env::var("RECHIMERA_LOG_FIRE_VS_IDLE").is_ok()
+                {
+                    dump_fire_vs_idle_rotations(&clips[fire_idx], &base);
+                }
+                let (rc, tc, sc) = clips[fire_idx].compose_with_base(&base, true);
+                eprintln!(
+                    "[anim-compose]  '{fire_name}' (nf={fire_nf}) <- '{base_name}' (nf={base_nf}) [{src}] — \
+                     copied rot={rc} tra={tc} scl={sc} bones"
+                );
+            }
+            None => {
+                eprintln!(
+                    "[anim-compose]  '{fire_name}' (nf={fire_nf}) — NO base '{base_name}' or 'mp_stand_dle' in animset"
+                );
+            }
+        }
+    }
+}
+
+/// Diagnostic — dump per-frame decoded rotation for the first 6 ANIMATED bones
+/// in `fire`, side-by-side with the matching frame from `base` (idle). If fire's
+/// values look near-identity and idle's look like real rotations, fire is a
+/// delta and needs the `idle * fire` multiply. If fire's values look like real
+/// rotations (large XYZ components) and idle's look similar, fire is absolute
+/// and the multiply is over-applying.
+fn dump_fire_vs_idle_rotations(fire: &lunalib::DecodedClip, base: &lunalib::DecodedClip) {
+    eprintln!("[fire-vs-idle] '{}' (nf={}) vs '{}' (nf={})",
+        fire.name, fire.num_frames, base.name, base.num_frames);
+    let fire_nf = fire.num_frames.max(1) as usize;
+    let base_nf = base.num_frames.max(1) as usize;
+    // Dump frame-0 only for ALL animated bones — find the ones whose rotation
+    // would land somewhere wrong after fill. Look for bones where fire's
+    // tracked components produce a quat that doesn't blend cleanly with idle.
+    for (b, fb) in fire.bones.iter().enumerate() {
+        if !fb.rotation_animated { continue; }
+        if fb.rotations.len() < fire_nf * 4 { continue; }
+        let bb = &base.bones[b];
+        let mc = fb.rot_components;
+        let missing = ['X','Y','Z','W'].iter().enumerate()
+            .filter_map(|(i, ch)| if mc & (1 << i) == 0 { Some(*ch) } else { None })
+            .collect::<String>();
+        let missing_str = if missing.is_empty() { "none".to_string() } else { missing };
+        let fq = (fb.rotations[0], fb.rotations[1], fb.rotations[2], fb.rotations[3]);
+        let (ix, iy, iz, iw) = if bb.rotation_animated && bb.rotations.len() >= base_nf * 4 {
+            (bb.rotations[0], bb.rotations[1], bb.rotations[2], bb.rotations[3])
+        } else if bb.rotations.len() == 4 {
+            (bb.rotations[0], bb.rotations[1], bb.rotations[2], bb.rotations[3])
+        } else {
+            (0.0, 0.0, 0.0, 1.0)
+        };
+        eprintln!(
+            "[fire-vs-idle]   bone {b:3}: rc=0b{mc:04b} missing={missing_str:>4}  fire=({:+.3},{:+.3},{:+.3},{:+.3})  idle=({:+.3},{:+.3},{:+.3},{:+.3})",
+            fq.0, fq.1, fq.2, fq.3, ix, iy, iz, iw,
+        );
+    }
+}
+
+/// Name heuristic: returns the matching idle clip for a fire/recoil overlay.
+/// Examples:
+///   mp_carbine_fire_p       -> mp_carbine_idle_p
+///   mp_carbine_alt_fire_p   -> mp_carbine_idle_p
+///   mp_minigun_fire_cycle_p -> mp_minigun_idle_p
+fn idle_base_for_overlay(name: &str) -> Option<String> {
+    for suffix in ["_alt_fire_p", "_fire_cycle_p", "_fire_p"] {
+        if let Some(stem) = name.strip_suffix(suffix) {
+            return Some(format!("{stem}_idle_p"));
+        }
+    }
+    None
 }
 
 fn animset_matches_debug_env(animset_hash: u64) -> bool {
@@ -740,9 +896,14 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<u64, String> {
 #[tauri::command]
 pub fn extract_level_to_cache(
     folder: String,
+    game_id: Option<String>,
     on_event: Channel<CacheEvent>,
 ) -> Result<(), String> {
-    match run_extract(&folder, &on_event) {
+    let game = game_id
+        .as_deref()
+        .and_then(Game::from_id)
+        .or_else(|| recover_game_from_sidecar(&folder));
+    match run_extract(&folder, game, &on_event) {
         Ok(entry_count) => {
             let _ = on_event.send(CacheEvent::Done { entry_count });
             Ok(())
@@ -806,39 +967,7 @@ fn dump_moby_shader_textures(
         return;
     }
     let total_submeshes: usize = asset.bangles.iter().map(|b| b.meshes.len()).sum();
-    let unique_shaders: HashSet<u16> = asset
-        .bangles
-        .iter()
-        .flat_map(|b| b.meshes.iter().map(|m| m.shader_index))
-        .collect();
-    eprintln!(
-        "[moby-tex] === moby_{:016X} '{}' ({} submeshes, {} unique shader indices, palette={}) ===",
-        asset.tuid,
-        asset.name,
-        total_submeshes,
-        unique_shaders.len(),
-        asset.shader_tuids.len(),
-    );
-    // Palette preview — first 12 shader tuids, truncated to lower 32 bits
-    // (full 64-bit tuids drown the line).
-    let palette_preview: Vec<String> = asset
-        .shader_tuids
-        .iter()
-        .take(12)
-        .enumerate()
-        .map(|(i, &t)| format!("{}=0x{:08X}", i, (t & 0xFFFFFFFF) as u32))
-        .collect();
-    let palette_more = asset.shader_tuids.len().saturating_sub(12);
-    eprintln!(
-        "[moby-tex]   shader palette: {}{}",
-        palette_preview.join(", "),
-        if palette_more > 0 {
-            format!(" … (+{} more)", palette_more)
-        } else {
-            String::new()
-        },
-    );
-
+    let per_submesh = std::env::var("RECHIMERA_LOG_MOBY_TEX").is_ok();
     let mut ok_albedo = 0usize;
     let mut missing_albedo = 0usize;
     let mut no_shader = 0usize;
@@ -850,74 +979,95 @@ fn dump_moby_shader_textures(
                 &asset.shader_tuids,
                 m.shader_index as usize,
             );
-            let shader_tuid = asset
-                .shader_tuids
-                .get(m.shader_index as usize)
-                .copied()
-                .unwrap_or(0);
             let alb_state = match albedo {
-                None => {
-                    no_shader += 1;
-                    "no-albedo".to_string()
-                }
+                None => { no_shader += 1; "no-albedo".to_string() }
                 Some(id) if texture_pngs.contains_key(&id) => {
                     ok_albedo += 1;
                     format!("OK 0x{:08X}", id)
                 }
-                Some(id) => {
-                    missing_albedo += 1;
-                    format!("MISSING 0x{:08X}", id)
-                }
+                Some(id) => { missing_albedo += 1; format!("MISSING 0x{:08X}", id) }
             };
-            let nrm_state = match normal {
-                None => "none".to_string(),
-                Some(id) if texture_pngs.contains_key(&id) => format!("0x{:08X}", id),
-                Some(id) => format!("MISSING 0x{:08X}", id),
-            };
-            let exp_state = match expensive {
-                None => "none".to_string(),
-                Some(id) if texture_pngs.contains_key(&id) => format!("0x{:08X}", id),
-                Some(id) => format!("MISSING 0x{:08X}", id),
-            };
-            // Why: R2 shaders use IT's V1 lookup (4 hashes: a / n / s / d).
-            // The detail map (slot 3) is sometimes the only non-zero slot
-            // when slots 0-2 are empty, so surface it here so we can spot
-            // those submeshes in the log.
-            let detail = asset
-                .shader_tuids
-                .get(m.shader_index as usize)
-                .and_then(|t| shaders.get(t))
-                .and_then(|s| s.detail_tex_id);
-            let det_state = match detail {
-                None => String::new(),
-                Some(id) if texture_pngs.contains_key(&id) => format!(" det=0x{:08X}", id),
-                Some(id) => format!(" det=MISSING 0x{:08X}", id),
-            };
-            eprintln!(
-                "[moby-tex]   submesh[{:3}] b{}.m shader_idx={} (shader_tuid=0x{:016X}) verts={} alb={} nrm={} exp={}{}",
-                submesh_idx,
-                bangle_idx,
-                m.shader_index,
-                shader_tuid,
-                m.vertex_count,
-                alb_state,
-                nrm_state,
-                exp_state,
-                det_state,
-            );
+            if per_submesh {
+                let shader_tuid = asset
+                    .shader_tuids
+                    .get(m.shader_index as usize)
+                    .copied()
+                    .unwrap_or(0);
+                let nrm_state = match normal {
+                    None => "none".to_string(),
+                    Some(id) if texture_pngs.contains_key(&id) => format!("0x{:08X}", id),
+                    Some(id) => format!("MISSING 0x{:08X}", id),
+                };
+                let exp_state = match expensive {
+                    None => "none".to_string(),
+                    Some(id) if texture_pngs.contains_key(&id) => format!("0x{:08X}", id),
+                    Some(id) => format!("MISSING 0x{:08X}", id),
+                };
+                eprintln!(
+                    "[moby-tex]   submesh[{:3}] b{}.m shader_idx={} (tuid=0x{:016X}) verts={} alb={} nrm={} exp={}",
+                    submesh_idx, bangle_idx, m.shader_index, shader_tuid,
+                    m.vertex_count, alb_state, nrm_state, exp_state,
+                );
+            }
             submesh_idx += 1;
         }
     }
     eprintln!(
-        "[moby-tex]   summary: ok_albedo={} missing_albedo={} no_albedo_in_shader={} (of {} submeshes)",
-        ok_albedo, missing_albedo, no_shader, total_submeshes,
+        "[moby-tex] moby_{:016X} '{}' submeshes={} ok_albedo={} missing={} no_shader={}",
+        asset.tuid, asset.name, total_submeshes, ok_albedo, missing_albedo, no_shader,
     );
 }
 
-fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, String> {
+fn recover_game_from_sidecar(folder: &str) -> Option<Game> {
+    let sidecar = cache_root(folder).join("game.json");
+    let bytes = fs::read(&sidecar).ok()?;
+    let s = std::str::from_utf8(&bytes).ok()?;
+    let start = s.find("\"game\":\"")?;
+    let rest = &s[start + 8..];
+    let end = rest.find('"')?;
+    Game::from_id(&rest[..end])
+}
+
+fn resolve_profile_for_folder(folder: &str, override_game_id: Option<&str>) -> AnimProfile {
+    if let Some(id) = override_game_id {
+        if let Some(g) = Game::from_id(id) {
+            return g.anim_profile();
+        }
+    }
+    if let Some(g) = recover_game_from_sidecar(folder) {
+        return g.anim_profile();
+    }
+    AnimProfile::LEGACY
+}
+
+fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>) -> Result<usize, String> {
+    let profile = match game {
+        Some(g) => g.anim_profile(),
+        None => AnimProfile::LEGACY,
+    };
+    eprintln!(
+        "[cache] anim profile: game={:?} delta_pos_scale={} blend_mask_gate={}",
+        profile.game, profile.apply_delta_pos_scale, profile.apply_blend_mask_rotation_gate,
+    );
     let level_path = Path::new(folder);
     let root = cache_root(folder);
     ensure_dirs(&root)?;
+
+    if let Some(g) = game {
+        let sidecar = root.join("game.json");
+        let _ = fs::write(
+            &sidecar,
+            format!("{{\"game\":\"{}\"}}\n", match g {
+                Game::Rfom => "r1",
+                Game::R2 => "r2",
+                Game::R3 => "r3",
+                Game::Tod => "rc_tod",
+                Game::A4O => "rc_a4o",
+                Game::ACiT => "rc_acit",
+                Game::FFA => "rc_ffa",
+            }),
+        );
+    }
 
     let layout = detect_layout(level_path)
         .map_err(|_| {
@@ -2138,6 +2288,54 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                 }
             }
 
+            // Patch overlay fallback. R2 PSN installs ship DLC content
+            // as `data/patch_NN.psarc`; `r2_extract_patches` unpacks them
+            // into `<usrdir>/built/patch/{textures,highmips,mobys,shaders,…}.dat`.
+            // That overlay carries the texture set for DLC characters
+            // (Rachel head, Female Soldier head, Grim/Ravager/Cloven body
+            // skins, blackops2/ranger2 variants) — a base-disc level can
+            // reference any of these IDs and only the overlay has the
+            // bytes. Treated as a fourth tier between globals and the
+            // sibling-level scan because the overlay is the authoritative
+            // DLC source (more specific than scrabbling through siblings).
+            let after_global: HashSet<u32> = r.iter().map(|(id, _)| *id).collect();
+            let still_missing_post_global: Vec<u32> = needed_ids
+                .iter()
+                .copied()
+                .filter(|id| !after_global.contains(id))
+                .collect();
+            if !still_missing_post_global.is_empty() {
+                if let Some(overlay) = lunalib::texture_global::find_patch_overlay(level_path) {
+                    match lunalib::bulk_extract_pngs(
+                        &overlay,
+                        Some(&still_missing_post_global),
+                        TEXTURE_MAX_DIM,
+                    ) {
+                        Ok(recovered) => {
+                            let n = recovered.len();
+                            for (id, png) in recovered {
+                                r.push((id, png));
+                            }
+                            if n > 0 {
+                                eprintln!(
+                                    "[patch-overlay-tex] recovered {} / {} missing textures from {}",
+                                    n,
+                                    still_missing_post_global.len(),
+                                    overlay.display(),
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[patch-overlay-tex] overlay {} failed: {}",
+                                overlay.display(),
+                                e,
+                            );
+                        }
+                    }
+                }
+            }
+
             // Cross-level fallback. R2 shares art (lobby UI, coop/MP
             // overlays, weapon variants) across level PSARCs, not the
             // globals — so meshes in this level can reference IDs whose
@@ -2365,6 +2563,7 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                         skel,
                         layout,
                         asset.tuid,
+                        profile,
                     );
                     if matches!(layout, LevelLayout::Rfom)
                         && decoded.len() != asset.rfom_anim_offsets.len()
@@ -2412,6 +2611,8 @@ fn run_extract(folder: &str, on_event: &Channel<CacheEvent>) -> Result<usize, St
                         pos_scale,
                         scale_scale,
                         sb,
+                        asset.skeleton.as_ref(),
+                        profile,
                     )
                 }
                 _ => Vec::new(),
@@ -2625,7 +2826,12 @@ pub fn cache_status(folder: String) -> Result<CacheStatus, String> {
     }
     let stale = is_cache_stale(Path::new(&folder), &manifest.source_mtimes);
 
-    let incomplete = !manifest.complete;
+    // Force a fresh extraction on every open when a debug filter or the
+    // explicit force flag is set. Lets the debug loop (set RECHIMERA_DEBUG_MOBY,
+    // re-open, read logs) skip the manual `_rechimera_cache` wipe — the cache
+    // is reported incomplete so the open flow rebuilds it.
+    let force = force_reextract_env();
+    let incomplete = !manifest.complete || force;
     Ok(CacheStatus {
         exists: true,
         folder,
@@ -2637,6 +2843,11 @@ pub fn cache_status(folder: String) -> Result<CacheStatus, String> {
         stale: stale || incomplete,
         incomplete,
     })
+}
+
+fn force_reextract_env() -> bool {
+    std::env::var("RECHIMERA_FORCE_REEXTRACT").is_ok()
+        || std::env::var("RECHIMERA_DEBUG_MOBY").is_ok()
 }
 
 fn cache_status_from_dir(
@@ -2940,6 +3151,8 @@ pub fn export_moby_glb_with_options(
             1.0 / 32768.0
         };
 
+        let profile = resolve_profile_for_folder(&level_folder, None);
+
         if matches!(layout, LevelLayout::Rfom | LevelLayout::Tod)
             && !asset.rfom_anim_offsets.is_empty()
         {
@@ -2958,6 +3171,7 @@ pub fn export_moby_glb_with_options(
                     skel,
                     layout,
                     asset.tuid,
+                    profile,
                 ));
             }
         }
@@ -2980,6 +3194,8 @@ pub fn export_moby_glb_with_options(
                 pos_scale,
                 scale_scale,
                 sb,
+                asset.skeleton.as_ref(),
+                profile,
             ));
         }
 
@@ -3031,6 +3247,8 @@ pub fn export_moby_glb_with_options(
                     pos_scale,
                     scale_scale,
                     sb,
+                    asset.skeleton.as_ref(),
+                    profile,
                 );
                 if pick.clip_indices.is_empty() {
                     clips.extend(extras);
@@ -3210,12 +3428,14 @@ pub fn export_moby_fbx_with_options(
             16,
         )
         .unwrap_or(0);
+        let profile = resolve_profile_for_folder(&level_folder, None);
         if let Some((_asset_again, decoded)) = try_load_skinned_moby_for_level(
             level_path,
             layout,
             target_tuid_u,
             animset_index.as_ref(),
             animsets_file.as_mut(),
+            profile,
         ) {
             clips = decoded;
         }
@@ -3340,6 +3560,7 @@ fn try_load_skinned_moby_for_level(
     tuid: u64,
     animset_index: Option<&AnimsetIndex>,
     animsets_file: Option<&mut std::fs::File>,
+    profile: AnimProfile,
 ) -> Option<(lunalib::MobyAsset, Vec<DecodedClip>)> {
     let mut asset: Option<lunalib::MobyAsset> = None;
     match layout {
@@ -3409,6 +3630,7 @@ fn try_load_skinned_moby_for_level(
                 skel,
                 layout,
                 asset.tuid,
+                profile,
             ));
         }
     }
@@ -3430,10 +3652,13 @@ fn try_load_skinned_moby_for_level(
                 pos_scale,
                 scale_scale,
                 sb,
+                asset.skeleton.as_ref(),
+                profile,
             ));
         }
     }
 
+    let _ = profile;
     Some((asset, clips))
 }
 
@@ -3510,6 +3735,7 @@ fn run_export_level(
                     tuid_u,
                     animset_index.as_ref(),
                     animsets_file.as_mut(),
+                    resolve_profile_for_folder(level_folder, None),
                 ) {
                     skinned_classes.insert(tuid_hex.clone(), (asset, clips));
                 }
@@ -4031,7 +4257,9 @@ pub fn decode_animset_clip(
     asset_tuid_hex: String,
     animset_hash: String,
     clip_index: u32,
+    game_id: Option<String>,
 ) -> Result<DecodedClipDto, String> {
+    let profile = resolve_profile_for_folder(&folder, game_id.as_deref());
     use lunalib::read_moby_assets_with_total;
     use std::io::{Read, Seek, SeekFrom};
 
@@ -4121,7 +4349,7 @@ pub fn decode_animset_clip(
     let ctrl =
         read_animation_control(&mut ig, &header).map_err(|e| format!("control: {e}"))?;
 
-    let clip = decode_animation(&mut ig, &header, &ctrl, pos_scale, scale_scale)
+    let clip = decode_animation_with_skel(&mut ig, &header, &ctrl, pos_scale, scale_scale, &skeleton, profile)
         .map_err(|e| format!("decode: {e}"))?;
 
     Ok(DecodedClipDto {
@@ -4212,14 +4440,29 @@ pub fn list_animsets(folder: String) -> Result<Vec<AnimsetSummary>, String> {
 #[tauri::command]
 pub fn reextract_level_cache(
     folder: String,
+    game_id: Option<String>,
     on_event: Channel<CacheEvent>,
 ) -> Result<(), String> {
+    // Recover game_id from the sidecar BEFORE wiping the cache dir — otherwise
+    // a re-extract triggered by App.tsx (which doesn't know the game) would
+    // fall back to LEGACY profile and clobber a prior wizard-built cache.
+    let resolved_game_id = game_id.or_else(|| {
+        recover_game_from_sidecar(&folder).map(|g| match g {
+            Game::Rfom => "r1".to_string(),
+            Game::R2 => "r2".to_string(),
+            Game::R3 => "r3".to_string(),
+            Game::Tod => "rc_tod".to_string(),
+            Game::A4O => "rc_a4o".to_string(),
+            Game::ACiT => "rc_acit".to_string(),
+            Game::FFA => "rc_ffa".to_string(),
+        })
+    });
     let root = cache_root(&folder);
     if root.exists() {
         fs::remove_dir_all(&root)
             .map_err(|e| format!("remove cache dir: {e}"))?;
     }
-    extract_level_to_cache(folder, on_event)
+    extract_level_to_cache(folder, resolved_game_id, on_event)
 }
 
 fn sanitized_cache_path(folder: &str, file: &str) -> Result<PathBuf, String> {

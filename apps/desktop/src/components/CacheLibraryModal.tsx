@@ -1,13 +1,13 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
+  ArrowLeftRight,
   ChevronLeft,
   ChevronRight,
   Database,
   Download,
   Maximize2,
   Minimize2,
-  RefreshCw,
   Search,
   X,
 } from "lucide-react";
@@ -23,10 +23,8 @@ import {
   readCachedAsset,
   readCachedBytes,
   readCachedManifest,
-  reextractLevelCache,
   writeBytes,
   type AssetMeshes,
-  type CacheEvent,
   type CacheManifest,
   type CubemapDescriptor,
   type CacheManifestEntry,
@@ -47,6 +45,16 @@ import { Button } from "../ui";
 interface CacheLibraryModalProps {
   open: boolean;
   onClose: () => void;
+  /** Change to a different map without redoing globals/patches extraction.
+   *  Closes this modal and opens the level-picker; the wizard auto-skips
+   *  steps that are already complete (globals, patches), landing the user
+   *  on the maps step with the existing USRDIR pre-filled. */
+  onSwitchMap?: () => void;
+  /** Close the currently-loaded game entirely — reset all level state
+   *  (meshes, instances, cache, selection, edits) and return to the
+   *  game-picker. Distinct from `onClose` which only dismisses this
+   *  modal but leaves the running scene/cache intact. */
+  onCloseGame?: () => void;
   folder: string | null;
   initialAssetTuid?: string | null;
   initialPanel?: LibraryFilter | null;
@@ -115,6 +123,8 @@ function splitPath(entry: CacheManifestEntry): { group: string; leaf: string } {
 export function CacheLibraryModal({
   open,
   onClose,
+  onSwitchMap,
+  onCloseGame,
   folder,
   initialAssetTuid,
   initialPanel,
@@ -138,7 +148,6 @@ export function CacheLibraryModal({
   );
   const [loadingAsset, setLoadingAsset] = useState(false);
   const [exporting, _setExporting] = useState(false);
-  const [reextractStatus, setReextractStatus] = useState<string | null>(null);
 
   
   useEffect(() => {
@@ -511,21 +520,25 @@ export function CacheLibraryModal({
   }, [filter, soundRows, selectedSoundKey]);
 
   // Why: arrow-key navigation can step into a sound on a different
-  // page than the one currently visible, which played the wrong-looking
-  // track (active row is off-screen, the visible page still shows
-  // unrelated rows). Whenever the selection changes, sync the page
-  // forward/back to whichever page actually contains that row. Covers
-  // arrow-key nav, modal-init via initialSoundKey, and any future
-  // programmatic select.
+  // page than the one currently visible. Whenever the SELECTION changes
+  // (or the underlying row set is narrowed by a search filter), sync
+  // the page to wherever the selected row lives. Covers arrow-key nav,
+  // modal-init via initialSoundKey, and any future programmatic select.
+  //
+  // Critical: `soundPage` MUST NOT be in the dep array. Listing it
+  // re-fires the effect when the user clicks the pagination control,
+  // which then computes the selection's page and snaps back — making
+  // forward navigation impossible. The effect only reacts to selection
+  // changes; React's setState bails on equal values so re-setting to
+  // the current page is a no-op when nothing actually moved.
   useEffect(() => {
     if (filter !== "sound" || !selectedSoundKey) return;
     const idx = soundRows.findIndex(
       (s) => `${s.source}-${s.index}-${s.name}` === selectedSoundKey,
     );
     if (idx < 0) return;
-    const targetPage = Math.floor(idx / SOUND_PAGE_SIZE);
-    if (targetPage !== soundPage) setSoundPage(targetPage);
-  }, [filter, selectedSoundKey, soundRows, soundPage, SOUND_PAGE_SIZE]);
+    setSoundPage(Math.floor(idx / SOUND_PAGE_SIZE));
+  }, [filter, selectedSoundKey, soundRows, SOUND_PAGE_SIZE]);
 
   const [decodedSoundCache, setDecodedSoundCache] = useState<
     Map<string, ExtractedSound>
@@ -1035,45 +1048,6 @@ export function CacheLibraryModal({
   
   
   
-  const handleReextract = async () => {
-    if (!folder || reextractStatus) return;
-    setReextractStatus("Re-extracting…");
-    setSelectedTuid(null);
-    setSelectedAsset(null);
-    setManifest(null);
-    const channel = new Channel<CacheEvent>();
-    let phase: "mobys" | "ties" | "materials" | "normalmaps" | "textures" | "ufrags" = "mobys";
-    channel.onmessage = (event) => {
-      switch (event.type) {
-        case "phase":
-          phase = event.phase;
-          setReextractStatus(`Re-extracting ${phase} 0/${event.total}`);
-          break;
-        case "progress":
-          setReextractStatus((s) =>
-            s ? s.replace(/\d+\//, `${event.current}/`) : s,
-          );
-          break;
-        case "done":
-          setReextractStatus(null);
-          readCachedManifest(folder)
-            .then(setManifest)
-            .catch((e) => setManifestError(String(e)));
-          break;
-        case "error":
-          setReextractStatus(null);
-          setManifestError(event.message);
-          break;
-      }
-    };
-    try {
-      await reextractLevelCache(folder, channel);
-    } catch (e) {
-      setReextractStatus(null);
-      setManifestError(String(e));
-    }
-  };
-
   return (
     <Modal
       open={open}
@@ -1158,16 +1132,17 @@ export function CacheLibraryModal({
               </button>
             )}
           </div>
-          <button
-            type="button"
-            className="cache-library-reextract"
-            onClick={handleReextract}
-            disabled={!folder || reextractStatus !== null}
-            title="Wipe and rebuild the cache from source .dat files"
-          >
-            <RefreshCw size={12} />
-            Re-extract
-          </button>
+          {onSwitchMap && (
+            <button
+              type="button"
+              className="cache-library-reextract"
+              onClick={onSwitchMap}
+              title="Open a different map without redoing globals/patches extraction"
+            >
+              <ArrowLeftRight size={12} />
+              Change map
+            </button>
+          )}
         </div>
       }
       size="xl"
@@ -1179,7 +1154,9 @@ export function CacheLibraryModal({
               {bulkStatus}
             </span>
           )}
-          <Button onClick={onClose}>Close</Button>
+          <Button onClick={onCloseGame ?? onClose}>
+            {onCloseGame ? "Close game files" : "Close"}
+          </Button>
           {(filter === "moby" || filter === "tie" || filter === "detail") &&
             (assetMulti.size > 1 ? (
               <Button
@@ -1314,11 +1291,6 @@ export function CacheLibraryModal({
                   <ChevronLeft size={14} />
                 )}
               </button>
-            </div>
-          )}
-          {reextractStatus && (
-            <div className="dim small" style={{ padding: "4px 10px" }}>
-              {reextractStatus}
             </div>
           )}
           <div className="cache-library-search">

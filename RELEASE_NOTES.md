@@ -2,6 +2,8 @@
 
 ## All games
 
+- New **"Extract asset lookup"** modal — a standalone V2 (R2 / R3 / ACiT / A4O / FFA) extractor independent of the level viewer. Browse to any `assetlookup.dat`, **Inspect** to see per-kind counts (mobys / ties / textures / cubemaps / shaders / zones …), check the kinds you want, and **Extract** with per-kind progress bars. Outputs: mobys & ties → `.glb`, textures & highmips → `.png`, cubemaps → 6 PNG faces, shaders & zones → JSON. Pure asset dump path — no three.js scene, no cache build.
+- **SkinnedMesh raycaster crash fix** — character GLBs with out-of-range bone indices no longer crash three.js (`Cannot read properties of undefined (reading 'matrixWorld')` during raycast / boundingSphere). Joint indices are now clamped to the actual skeleton bone count instead of the u8 ceiling.
 - New **app skin system** with five skins: Default, Resistance: Fall of Man, Resistance 2, Resistance 3, R&C: A Crack in Time
 - Per-skin **light/dark mode locking** — dark-only skins disable the light toggle automatically
 - Each skin recolors **the entire app shell** (top bar, panels, tabs, lists, modals), not just dialogs
@@ -35,6 +37,8 @@
 - Per-game **map images folder** — drop `public/<gameId>/maps/<level>.png` and it shows up
 - **SP-stem fallback** for coop / multiplayer maps — ship `chicago.png` once and `chicago_coop` / `chicago_multiplayer` pick it up
 - PSARC extraction is **name-agnostic** — extracts every `.psarc` in a level folder regardless of name (mods, DLC, non-standard packings all work)
+- **Character GLBs now exported with real names** — extracted mobys and ties land as `HEAD_HALE_0x….glb`, `BODY_RANGER_0x….glb`, `CHIM_HEAD_HYBRID_0x….glb`, `COOP_HEAD_0x….glb` (instead of `0x<TUID>.glb`). Reads `comp_outfitter.csv` + `coop_outfitter.csv` from `global_cached/data/configs/` automatically — no setup needed, works the moment globals are extracted.
+- A **`name_lookup.json`** is written at the asset-lookup extract output root with every known TUID → name pair, sorted by TUID, so external tools have a master index.
 - **AssetWorkbench** view added (per-asset 3D scene, submesh / texture / animation drawer, frame-by-frame timeline scrubber, Export GLB)
 - Open-in-Workbench entry points from Cache Library + Inspector
 - Missing-texture submeshes get a **magenta tint** instead of default white-under-light
@@ -50,19 +54,8 @@
 - ToD wizard adaptation (still uses the generic folder picker)
 - ToD character animations decoding (T-pose only currently)
 - ToD skybox decoder
+- Resistance 3 — try-and-fix pass for terrains, animations, and textures on models that aren't extracting the way they should
 - Collision geometry parsing (currently a Godot-side workaround)
 - FBX export (disabled this round; use GLB)
-- Integrated PS3 disc decryption (currently an external pre-step)
 - `hover.wav` global delegate and `back.wav` for non-modal back actions
 
-## Install
-
-Pick the bundle for your OS. Windows shows an **Update** button on existing installs; macOS / Linux reinstall manually.
-
-For pre-release builds, see the [canary channel](../../releases?q=canary&expanded=true). Expect breakage; file issues with the full version string (e.g. `0.5.1-15`).
-
-## Acknowledgements
-
-- [@VELD-Dev](https://github.com/VELD-Dev) — [ReLunacy / LibLunacy](https://github.com/VELD-Dev/ReLunacy)
-- [@NefariousTechSupport](https://github.com/NefariousTechSupport) — [Lunacy / 7th igRewrite](https://github.com/NefariousTechSupport/7thigRewrite)
-- [@PredatorCZ](https://github.com/PredatorCZ) — [InsomniaToolset / Spike](https://github.com/PredatorCZ/InsomniaToolset)
