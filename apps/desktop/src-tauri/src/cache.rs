@@ -866,6 +866,47 @@ fn idle_base_for_overlay(name: &str) -> Option<String> {
     None
 }
 
+const ANIMSET_MEMO_CAP: usize = 6;
+
+fn fnv1a_fold(hash: &mut u64, bytes: &[u8]) {
+    for &b in bytes {
+        *hash ^= u64::from(b);
+        *hash = hash.wrapping_mul(0x100000001B3);
+    }
+}
+
+fn anim_offsets_key(offsets: &[u64]) -> u64 {
+    let mut h: u64 = 0xCBF29CE484222325;
+    for &o in offsets {
+        fnv1a_fold(&mut h, &o.to_le_bytes());
+    }
+    h
+}
+
+// Memo key MUST include the skeleton fingerprint, not just the animset id:
+// decoded clips inherit bind-pose fallbacks and shift-derived pos/scale from
+// the moby's skeleton, so two rigs sharing an animset decode differently.
+fn skeleton_anim_fingerprint(skel: Option<&lunalib::Skeleton>) -> u64 {
+    let mut h: u64 = 0xCBF29CE484222325;
+    let Some(s) = skel else {
+        return h;
+    };
+    fnv1a_fold(&mut h, &(s.bones.len() as u64).to_le_bytes());
+    fnv1a_fold(&mut h, &s.translation_shift.to_le_bytes());
+    fnv1a_fold(&mut h, &s.scale_shift.to_le_bytes());
+    fnv1a_fold(&mut h, &s.root_bone.to_le_bytes());
+    for b in &s.bones {
+        fnv1a_fold(&mut h, &b.flags.to_le_bytes());
+        fnv1a_fold(&mut h, &b.parent_index.to_le_bytes());
+    }
+    for m in &s.bind_local {
+        for f in m {
+            fnv1a_fold(&mut h, &f.to_bits().to_le_bytes());
+        }
+    }
+    h
+}
+
 fn animset_matches_debug_env(animset_hash: u64) -> bool {
     let Ok(want) = std::env::var("RECHIMERA_DEBUG_ANIMSET") else {
         return false;
@@ -2368,6 +2409,10 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
         phase: "mobys",
         total: moby_assets_for_glb.len() + tie_assets_for_glb.len(),
     });
+    let mut animset_memo: HashMap<(u64, u64), Vec<DecodedClip>> = HashMap::new();
+    let mut animset_memo_order: std::collections::VecDeque<(u64, u64)> = Default::default();
+    let mut animset_memo_hits = 0usize;
+    let mut animset_memo_misses = 0usize;
     let mut glb_done = 0usize;
     for asset in moby_assets_for_glb.into_iter() {
         let trans_shift = asset
@@ -2402,21 +2447,39 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
             match asset.skeleton.as_ref() {
                 Some(skel) => {
                     lunalib::skeleton::dump_skeleton_bind(asset.tuid, skel);
-                    let main_dat = match layout {
-                        LevelLayout::Tod => "main.dat",
-                        _ => "ps3levelmain.dat",
-                    };
-                    let decoded = decode_clips_for_moby_inline(
-                        level_path,
-                        main_dat,
-                        &asset.rfom_anim_offsets,
-                        pos_scale,
-                        scale_scale,
-                        skel,
-                        layout,
-                        asset.tuid,
-                        profile,
+                    let key = (
+                        anim_offsets_key(&asset.rfom_anim_offsets),
+                        skeleton_anim_fingerprint(Some(skel)),
                     );
+                    let decoded = if let Some(cached) = animset_memo.get(&key) {
+                        animset_memo_hits += 1;
+                        cached.clone()
+                    } else {
+                        animset_memo_misses += 1;
+                        let main_dat = match layout {
+                            LevelLayout::Tod => "main.dat",
+                            _ => "ps3levelmain.dat",
+                        };
+                        let d = decode_clips_for_moby_inline(
+                            level_path,
+                            main_dat,
+                            &asset.rfom_anim_offsets,
+                            pos_scale,
+                            scale_scale,
+                            skel,
+                            layout,
+                            asset.tuid,
+                            profile,
+                        );
+                        animset_memo.insert(key, d.clone());
+                        animset_memo_order.push_back(key);
+                        if animset_memo_order.len() > ANIMSET_MEMO_CAP {
+                            if let Some(old) = animset_memo_order.pop_front() {
+                                animset_memo.remove(&old);
+                            }
+                        }
+                        d
+                    };
                     if matches!(layout, LevelLayout::Rfom)
                         && decoded.len() != asset.rfom_anim_offsets.len()
                     {
@@ -2450,22 +2513,37 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
                 animsets_file.as_mut(),
             ) {
                 (Some(hash), Some(idx), Some(file)) => {
-                    let sb = asset
-                        .skeleton
-                        .as_ref()
-                        .map(|s| s.bones.len() as u16)
-                        .unwrap_or(0);
-                    decode_clips_for_moby(
-                        level_path,
-                        idx,
-                        file,
-                        hash,
-                        pos_scale,
-                        scale_scale,
-                        sb,
-                        asset.skeleton.as_ref(),
-                        profile,
-                    )
+                    let key = (hash, skeleton_anim_fingerprint(asset.skeleton.as_ref()));
+                    if let Some(cached) = animset_memo.get(&key) {
+                        animset_memo_hits += 1;
+                        cached.clone()
+                    } else {
+                        animset_memo_misses += 1;
+                        let sb = asset
+                            .skeleton
+                            .as_ref()
+                            .map(|s| s.bones.len() as u16)
+                            .unwrap_or(0);
+                        let d = decode_clips_for_moby(
+                            level_path,
+                            idx,
+                            file,
+                            hash,
+                            pos_scale,
+                            scale_scale,
+                            sb,
+                            asset.skeleton.as_ref(),
+                            profile,
+                        );
+                        animset_memo.insert(key, d.clone());
+                        animset_memo_order.push_back(key);
+                        if animset_memo_order.len() > ANIMSET_MEMO_CAP {
+                            if let Some(old) = animset_memo_order.pop_front() {
+                                animset_memo.remove(&old);
+                            }
+                        }
+                        d
+                    }
                 }
                 _ => Vec::new(),
             }
@@ -2562,6 +2640,14 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
         glb_done += 1;
         let _ = on_event.send(CacheEvent::Progress { current: glb_done });
     }
+    if animset_memo_hits + animset_memo_misses > 0 {
+        eprintln!(
+            "[anim-memo] {} animset decodes, {} reused from memo",
+            animset_memo_misses, animset_memo_hits
+        );
+    }
+    drop(animset_memo);
+    drop(animset_memo_order);
 
     fs::create_dir_all(root.join("ties")).map_err(|e| format!("create ties dir: {e}"))?;
     for tie in tie_assets_for_glb.into_iter() {
