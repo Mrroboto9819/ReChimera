@@ -4,6 +4,8 @@ use std::fs::File;
 use std::io::{BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use rayon::prelude::*;
+
 use crate::assetlookup::{AssetKind, AssetLookup};
 use crate::error::{Error, Result};
 use crate::igfile::IgFile;
@@ -80,23 +82,51 @@ where
     let ties_path = level_folder.join("ties.dat");
     let mut ties_file = File::open(&ties_path)?;
 
-    for ptr in filtered {
-        if ptr.length > crate::MAX_ASSET_SIZE {
-            return Err(crate::error::Error::AllocLimitExceeded {
-                size: u64::from(ptr.length),
-                limit: u64::from(crate::MAX_ASSET_SIZE),
-            });
+    const BUFFER_AHEAD: usize = 16;
+
+    let total = filtered.len();
+    let mut next_index = 0usize;
+    while next_index < total {
+        let end = (next_index + BUFFER_AHEAD).min(total);
+        let slice = &filtered[next_index..end];
+
+        let mut bufs: Vec<(usize, Vec<u8>, u64)> = Vec::with_capacity(slice.len());
+        for (i, ptr) in slice.iter().enumerate() {
+            if ptr.length > crate::MAX_ASSET_SIZE {
+                return Err(Error::AllocLimitExceeded {
+                    size: u64::from(ptr.length),
+                    limit: u64::from(crate::MAX_ASSET_SIZE),
+                });
+            }
+            ties_file.seek(SeekFrom::Start(u64::from(ptr.offset)))?;
+            let mut buf = vec![0u8; ptr.length as usize];
+            ties_file.read_exact(&mut buf)?;
+            bufs.push((next_index + i, buf, ptr.tuid));
         }
-        ties_file.seek(SeekFrom::Start(u64::from(ptr.offset)))?;
-        let mut buf = vec![0u8; ptr.length as usize];
-        ties_file.read_exact(&mut buf)?;
-        let mut tie_ig = IgFile::open(Cursor::new(buf))?;
-        match parse_tie(&mut tie_ig, ptr.tuid) {
-            Ok(tie) => on_each(tie),
-            Err(e) => {
-                eprintln!("warn: tie 0x{:016X} skipped: {e}", ptr.tuid);
+
+        let mut parsed: Vec<(usize, u64, Result<TieAsset>)> = bufs
+            .into_par_iter()
+            .map(|(idx, buf, tuid)| {
+                let parsed_or_err = (|| {
+                    let mut tie_ig = IgFile::open(Cursor::new(buf))?;
+                    parse_tie(&mut tie_ig, tuid)
+                })();
+                (idx, tuid, parsed_or_err)
+            })
+            .collect();
+
+        parsed.sort_by_key(|(i, _, _)| *i);
+
+        for (_i, tuid, result) in parsed {
+            match result {
+                Ok(tie) => on_each(tie),
+                Err(e) => {
+                    eprintln!("warn: tie 0x{:016X} skipped: {e}", tuid);
+                }
             }
         }
+
+        next_index = end;
     }
     Ok(())
 }
