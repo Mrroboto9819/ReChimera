@@ -2822,10 +2822,13 @@ pub fn export_moby_glb_with_options(
     }
 
     let shaders = if options.include_materials {
-        match layout {
-            LevelLayout::V2 => read_shaders(level_path).map_err(|e| e.to_string())?,
-            LevelLayout::Tod => lunalib::read_shaders_old(level_path).unwrap_or_default(),
-            LevelLayout::Rfom => lunalib::read_shaders_rfom(level_path).unwrap_or_default(),
+        {
+            let loaded = lunalib::engine_for_layout(layout).read_shaders(level_path);
+            if matches!(layout, LevelLayout::V2) {
+                loaded.map_err(|e| e.to_string())?
+            } else {
+                loaded.unwrap_or_default()
+            }
         }
     } else {
         HashMap::new()
@@ -3151,10 +3154,13 @@ pub fn export_moby_fbx_with_options(
     }
 
     let shaders = if options.include_materials {
-        match layout {
-            LevelLayout::V2 => read_shaders(level_path).map_err(|e| e.to_string())?,
-            LevelLayout::Tod => lunalib::read_shaders_old(level_path).unwrap_or_default(),
-            LevelLayout::Rfom => lunalib::read_shaders_rfom(level_path).unwrap_or_default(),
+        {
+            let loaded = lunalib::engine_for_layout(layout).read_shaders(level_path);
+            if matches!(layout, LevelLayout::V2) {
+                loaded.map_err(|e| e.to_string())?
+            } else {
+                loaded.unwrap_or_default()
+            }
         }
     } else {
         HashMap::new()
@@ -3478,11 +3484,7 @@ fn run_export_level(
             for inst in &mobys {
                 unique_tuids.insert(inst.asset_tuid.clone());
             }
-            shaders_for_anim = match lay {
-                LevelLayout::V2 => read_shaders(level_path).unwrap_or_default(),
-                LevelLayout::Tod => lunalib::read_shaders_old(level_path).unwrap_or_default(),
-                LevelLayout::Rfom => lunalib::read_shaders_rfom(level_path).unwrap_or_default(),
-            };
+            shaders_for_anim = lunalib::engine_for_layout(lay).read_shaders(level_path).unwrap_or_default();
             let animset_index = if matches!(lay, LevelLayout::V2) {
                 AnimsetIndex::build(level_path).ok()
             } else {

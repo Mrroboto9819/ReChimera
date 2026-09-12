@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::error::Result;
@@ -5,6 +6,7 @@ use crate::game::{Game, GameProfile};
 use crate::level_layout::LevelLayout;
 use crate::moby::MobyAsset;
 use crate::reader::{moby_reader_for_layout, tie_reader_for_layout};
+use crate::shader::ShaderInfo;
 use crate::tie::TieAsset;
 
 pub struct GameEngine {
@@ -58,5 +60,13 @@ impl GameEngine {
         on_each: &mut dyn FnMut(TieAsset),
     ) -> Result<()> {
         tie_reader_for_layout(self.profile.layout).read(folder, tuids, on_total, on_each)
+    }
+
+    pub fn read_shaders(&self, folder: &Path) -> Result<HashMap<u64, ShaderInfo>> {
+        match self.profile.layout {
+            LevelLayout::V2 => crate::shader::read_shaders(folder),
+            LevelLayout::Tod => crate::shader_old::read_shaders_old(folder),
+            LevelLayout::Rfom => crate::shader_rfom::read_shaders_rfom(folder),
+        }
     }
 }
