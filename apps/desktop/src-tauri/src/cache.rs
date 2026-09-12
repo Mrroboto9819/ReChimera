@@ -10,7 +10,7 @@ use lunalib::{
     animation_section_offsets, decode_animation, decode_animation_with_skel, AnimProfile, Game,
     decode_animation_with_skeleton, detect_layout,
     read_animation_control, read_animation_header_at,
-    read_moby_assets_with_total, read_shaders, read_tie_assets_with_total, read_zones, AssetKind,
+    read_shaders, read_tie_assets_with_total, read_zones, AssetKind,
     AssetLookup, DecodedClip, IgFile, LevelLayout, ShaderInfo, Skeleton, UFrag, Zone,
 };
 use serde::{Deserialize, Serialize};
@@ -1236,244 +1236,96 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
     let mut tie_assets_for_glb: Vec<lunalib::TieAsset> = Vec::new();
 
     let mut moby_done = 0usize;
-    let phase_total_emit = |total: usize| {
-        let _ = on_event.send(CacheEvent::Phase {
-            phase: "mobys",
-            total,
-        });
+    let mut emitted_moby_tuids: Vec<u64> = Vec::new();
+    let moby_result = {
+        let mut on_total = |total: usize| {
+            let _ = on_event.send(CacheEvent::Phase {
+                phase: "mobys",
+                total,
+            });
+        };
+        let mut on_moby = |asset: lunalib::MobyAsset| {
+            if let Some(suffixes) = &debug_filter {
+                if !debug_moby_match(asset.tuid, suffixes) {
+                    return;
+                }
+            }
+            emitted_moby_tuids.push(asset.tuid);
+            moby_assets_for_glb.push(asset.clone());
+
+            let mut submeshes = Vec::new();
+            for bangle in &asset.bangles {
+                for m in &bangle.meshes {
+                    let (albedo, normal, emissive) = resolve_shader_textures(
+                        &shaders,
+                        &asset.shader_tuids,
+                        m.shader_index as usize,
+                    );
+                    if let Some(id) = albedo { needed_albedos.insert(id); }
+                    if let Some(id) = normal { needed_normals.insert(id); }
+                    if let Some(id) = emissive { needed_emissives.insert(id); }
+                    submeshes.push(mesh_dto(
+                        m.positions.clone(),
+                        m.uvs.clone(),
+                        m.indices.clone(),
+                        albedo,
+                        normal,
+                        emissive,
+                        m.bone_indices.clone(),
+                        m.bone_weights.clone(),
+                    ));
+                }
+            }
+            let dto = AssetMeshesDto {
+                asset_tuid: format!("0x{:016X}", asset.tuid),
+                name: asset.name.clone(),
+                submeshes,
+                skeleton: build_skeleton_dto(&asset.skeleton),
+                animset_hash: asset.animset_hash.map(|h| format!("0x{:016X}", h)),
+                bind_pose_inverse_offset: asset.bind_pose_inverse_offset,
+                embedded_animation_count: asset.rfom_anim_offsets.len() as u32,
+            };
+            let file_rel = format!("mobys/0x{:016X}.json", asset.tuid);
+            let path = root.join(&file_rel);
+            if let Ok(size_bytes) = write_json(&path, &dto) {
+                entries.push(CacheManifestEntry {
+                    kind: "moby".into(),
+                    tuid: dto.asset_tuid.clone(),
+                    name: dto.name.clone(),
+                    file: file_rel.clone(),
+                    size_bytes,
+                });
+            }
+            moby_done += 1;
+            let _ = on_event.send(CacheEvent::Item {
+                kind: "moby",
+                name: dto.name,
+                file: file_rel,
+            });
+            let _ = on_event.send(CacheEvent::Progress { current: moby_done });
+        };
+        lunalib::engine_for_layout(layout).read_mobys(level_path, None, &mut on_total, &mut on_moby)
     };
-    if matches!(layout, LevelLayout::Tod) {
-        let mut tod_count = 0usize;
-        if let Err(e) = lunalib::read_moby_assets_old_with_total(
-            level_path,
-            |total| {
-                let _ = on_event.send(CacheEvent::Phase {
-                    phase: "mobys",
-                    total,
-                });
-            },
-            |asset| {
-            if let Some(suffixes) = &debug_filter {
-                if !debug_moby_match(asset.tuid, suffixes) {
-                    return;
-                }
-            }
-            tod_count += 1;
-            moby_assets_for_glb.push(asset.clone());
-
-            let mut submeshes = Vec::new();
-            for bangle in &asset.bangles {
-                for m in &bangle.meshes {
-                    let (albedo, normal, emissive) = resolve_shader_textures(
-                        &shaders,
-                        &asset.shader_tuids,
-                        m.shader_index as usize,
-                    );
-                    if let Some(id) = albedo { needed_albedos.insert(id); }
-                    if let Some(id) = normal { needed_normals.insert(id); }
-                    if let Some(id) = emissive { needed_emissives.insert(id); }
-                    submeshes.push(mesh_dto(
-                        m.positions.clone(),
-                        m.uvs.clone(),
-                        m.indices.clone(),
-                        albedo,
-                        normal,
-                        emissive,
-                        m.bone_indices.clone(),
-                        m.bone_weights.clone(),
-                    ));
-                }
-            }
-            let dto = AssetMeshesDto {
-                asset_tuid: format!("0x{:016X}", asset.tuid),
-                name: asset.name.clone(),
-                submeshes,
-                skeleton: build_skeleton_dto(&asset.skeleton),
-                animset_hash: None,
-                bind_pose_inverse_offset: asset.bind_pose_inverse_offset,
-                embedded_animation_count: asset.rfom_anim_offsets.len() as u32,
-            };
-            let file_rel = format!("mobys/0x{:016X}.json", asset.tuid);
-            let path = root.join(&file_rel);
-            if let Ok(size_bytes) = write_json(&path, &dto) {
-                entries.push(CacheManifestEntry {
-                    kind: "moby".into(),
-                    tuid: dto.asset_tuid.clone(),
-                    name: dto.name.clone(),
-                    file: file_rel.clone(),
-                    size_bytes,
-                });
-            }
-            let _ = on_event.send(CacheEvent::Item {
-                kind: "moby",
-                name: dto.name,
-                file: file_rel,
-            });
-            let _ = on_event.send(CacheEvent::Progress { current: tod_count });
-        },
-        ) {
-            return Err(format!("TOD moby read failed: {e}"));
+    if let Err(e) = moby_result {
+        match layout {
+            LevelLayout::Rfom => eprintln!("warn: RFOM moby read failed: {e}"),
+            LevelLayout::Tod => return Err(format!("TOD moby read failed: {e}")),
+            LevelLayout::V2 => return Err(e.to_string()),
         }
-        eprintln!("[cache] TOD layout: extracted {tod_count} mobys");
-    } else if matches!(layout, LevelLayout::Rfom) {
-        // RFOM path — Stage R.1. Reads MobyV1 (0xC0) + PrimitiveV1
-        // (0x20) from ps3levelmain.dat with geometry sourced from
-        // ps3levelverts.dat. Shaders/textures/skeleton are not ported
-        // yet so submeshes carry None texture ids and the skeleton/
-        // animset fields stay empty.
-        let mut rfom_count = 0usize;
-        if let Err(e) = lunalib::read_moby_assets_rfom_with_total(
-            level_path,
-            |total| {
-                let _ = on_event.send(CacheEvent::Phase {
-                    phase: "mobys",
-                    total,
-                });
-            },
-            |asset| {
-            if let Some(suffixes) = &debug_filter {
-                if !debug_moby_match(asset.tuid, suffixes) {
-                    return;
-                }
-            }
-            rfom_count += 1;
-            moby_assets_for_glb.push(asset.clone());
-
-            let mut submeshes = Vec::new();
-            for bangle in &asset.bangles {
-                for m in &bangle.meshes {
-                    let (albedo, normal, emissive) = resolve_shader_textures(
-                        &shaders,
-                        &asset.shader_tuids,
-                        m.shader_index as usize,
-                    );
-                    if let Some(id) = albedo { needed_albedos.insert(id); }
-                    if let Some(id) = normal { needed_normals.insert(id); }
-                    if let Some(id) = emissive { needed_emissives.insert(id); }
-                    submeshes.push(mesh_dto(
-                        m.positions.clone(),
-                        m.uvs.clone(),
-                        m.indices.clone(),
-                        albedo,
-                        normal,
-                        emissive,
-                        m.bone_indices.clone(),
-                        m.bone_weights.clone(),
-                    ));
-                }
-            }
-            let dto = AssetMeshesDto {
-                asset_tuid: format!("0x{:016X}", asset.tuid),
-                name: asset.name.clone(),
-                submeshes,
-                skeleton: build_skeleton_dto(&asset.skeleton),
-                animset_hash: None,
-                bind_pose_inverse_offset: asset.bind_pose_inverse_offset,
-                embedded_animation_count: asset.rfom_anim_offsets.len() as u32,
-            };
-            let file_rel = format!("mobys/0x{:016X}.json", asset.tuid);
-            let path = root.join(&file_rel);
-            if let Ok(size_bytes) = write_json(&path, &dto) {
-                entries.push(CacheManifestEntry {
-                    kind: "moby".into(),
-                    tuid: dto.asset_tuid.clone(),
-                    name: dto.name.clone(),
-                    file: file_rel.clone(),
-                    size_bytes,
-                });
-            }
-            let _ = on_event.send(CacheEvent::Item {
-                kind: "moby",
-                name: dto.name,
-                file: file_rel,
-            });
-            let _ = on_event.send(CacheEvent::Progress { current: rfom_count });
-        },
-        ) {
-            eprintln!("warn: RFOM moby read failed: {e}");
-        }
-        eprintln!("[cache] RFOM layout: extracted {rfom_count} mobys");
-    } else {
-        let mut emitted_moby_tuids: Vec<u64> = Vec::new();
-        read_moby_assets_with_total(
-            level_path,
-            None,
-            phase_total_emit,
-            |asset| {
-                if let Some(suffixes) = &debug_filter {
-                    if !debug_moby_match(asset.tuid, suffixes) {
-                        return;
-                    }
-                }
-                emitted_moby_tuids.push(asset.tuid);
-                moby_assets_for_glb.push(asset.clone());
-
-                let mut submeshes = Vec::new();
-                for bangle in asset.bangles {
-                    for m in bangle.meshes {
-                        let (albedo, normal, emissive) = resolve_shader_textures(
-                            &shaders,
-                            &asset.shader_tuids,
-                            m.shader_index as usize,
-                        );
-                        if let Some(id) = albedo { needed_albedos.insert(id); }
-                        if let Some(id) = normal { needed_normals.insert(id); }
-                        if let Some(id) = emissive { needed_emissives.insert(id); }
-                        submeshes.push(mesh_dto(
-                            m.positions,
-                            m.uvs,
-                            m.indices,
-                            albedo,
-                            normal,
-                            emissive,
-                            m.bone_indices,
-                            m.bone_weights,
-                        ));
-                    }
-                }
-                let dto = AssetMeshesDto {
-                    asset_tuid: format!("0x{:016X}", asset.tuid),
-                    name: asset.name.clone(),
-                    submeshes,
-                    skeleton: build_skeleton_dto(&asset.skeleton),
-                    animset_hash: asset.animset_hash.map(|h| format!("0x{:016X}", h)),
-                    bind_pose_inverse_offset: asset.bind_pose_inverse_offset,
-                    embedded_animation_count: 0,
-                };
-                let file_rel = format!("mobys/0x{:016X}.json", asset.tuid);
-                let path = root.join(&file_rel);
-                if let Ok(size_bytes) = write_json(&path, &dto) {
-                    entries.push(CacheManifestEntry {
-                        kind: "moby".into(),
-                        tuid: dto.asset_tuid.clone(),
-                        name: dto.name.clone(),
-                        file: file_rel.clone(),
-                        size_bytes,
-                    });
-                }
-                moby_done += 1;
-                let _ = on_event.send(CacheEvent::Item {
-                    kind: "moby",
-                    name: dto.name,
-                    file: file_rel,
-                });
-                let _ = on_event.send(CacheEvent::Progress { current: moby_done });
-            },
-        )
-        .map_err(|e| e.to_string())?;
-
-        if std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
-            let sample_moby_tuids: Vec<String> = emitted_moby_tuids
-                .iter()
-                .take(10)
-                .map(|t| format!("0x{:016X}", t))
-                .collect();
-            eprintln!(
-                "[v2-match] V2 extracted {} mobys; first 10 tuids: {:?}",
-                emitted_moby_tuids.len(),
-                sample_moby_tuids
-            );
-        }
+    }
+    eprintln!("[cache] {} layout: extracted {} mobys", layout.tag(), moby_done);
+    if std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
+        let sample_moby_tuids: Vec<String> = emitted_moby_tuids
+            .iter()
+            .take(10)
+            .map(|t| format!("0x{:016X}", t))
+            .collect();
+        eprintln!(
+            "[moby-match] {} extracted {} mobys; first 10 tuids: {:?}",
+            layout.tag(),
+            emitted_moby_tuids.len(),
+            sample_moby_tuids
+        );
     }
 
     eprintln!("[cache] -> phase ties (layout={})", layout.tag());
