@@ -2905,8 +2905,6 @@ pub fn export_moby_glb_with_options(
     out_path: String,
     options: GlbExportOptions,
 ) -> Result<u64, String> {
-    use lunalib::{read_moby_assets_with_total, read_tie_assets_with_total};
-
     let level_path = std::path::Path::new(&level_folder);
     let target_tuid = u64::from_str_radix(
         asset_tuid_hex
@@ -2917,68 +2915,35 @@ pub fn export_moby_glb_with_options(
     .map_err(|e| format!("parse asset tuid {asset_tuid_hex}: {e}"))?;
 
     let layout = lunalib::detect_layout(level_path).map_err(|e| e.to_string())?;
+    let engine = lunalib::engine_for_layout(layout);
 
     let mut moby_asset: Option<lunalib::MobyAsset> = None;
     let mut tie_asset: Option<lunalib::TieAsset> = None;
-    match layout {
-        LevelLayout::V2 => {
-            read_moby_assets_with_total(
+    engine
+        .read_mobys(
+            level_path,
+            Some(&[target_tuid]),
+            &mut |_: usize| {},
+            &mut |a: lunalib::MobyAsset| {
+                if a.tuid == target_tuid {
+                    moby_asset = Some(a);
+                }
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    if moby_asset.is_none() {
+        engine
+            .read_ties(
                 level_path,
                 Some(&[target_tuid]),
-                |_| {},
-                |a| {
+                &mut |_: usize| {},
+                &mut |a: lunalib::TieAsset| {
                     if a.tuid == target_tuid {
-                        moby_asset = Some(a);
+                        tie_asset = Some(a);
                     }
                 },
             )
             .map_err(|e| e.to_string())?;
-            if moby_asset.is_none() {
-                read_tie_assets_with_total(
-                    level_path,
-                    Some(&[target_tuid]),
-                    |_| {},
-                    |a| {
-                        if a.tuid == target_tuid {
-                            tie_asset = Some(a);
-                        }
-                    },
-                )
-                .map_err(|e| e.to_string())?;
-            }
-        }
-        LevelLayout::Tod => {
-            lunalib::read_moby_assets_old(level_path, |a| {
-                if a.tuid == target_tuid {
-                    moby_asset = Some(a);
-                }
-            })
-            .map_err(|e| e.to_string())?;
-            if moby_asset.is_none() {
-                lunalib::read_tie_assets_old(level_path, |a| {
-                    if a.tuid == target_tuid {
-                        tie_asset = Some(a);
-                    }
-                })
-                .map_err(|e| e.to_string())?;
-            }
-        }
-        LevelLayout::Rfom => {
-            lunalib::read_moby_assets_rfom(level_path, |a| {
-                if a.tuid == target_tuid {
-                    moby_asset = Some(a);
-                }
-            })
-            .map_err(|e| e.to_string())?;
-            if moby_asset.is_none() {
-                lunalib::read_tie_assets_rfom(level_path, |a| {
-                    if a.tuid == target_tuid {
-                        tie_asset = Some(a);
-                    }
-                })
-                .map_err(|e| e.to_string())?;
-            }
-        }
     }
 
     let mut synthetic_from_tie = false;
@@ -3279,8 +3244,6 @@ pub fn export_moby_fbx_with_options(
     out_path: String,
     options: GlbExportOptions,
 ) -> Result<u64, String> {
-    use lunalib::{read_moby_assets_with_total, read_tie_assets_with_total};
-
     let level_path = std::path::Path::new(&level_folder);
     let target_tuid = u64::from_str_radix(
         asset_tuid_hex
@@ -3291,68 +3254,35 @@ pub fn export_moby_fbx_with_options(
     .map_err(|e| format!("parse asset tuid {asset_tuid_hex}: {e}"))?;
 
     let layout = lunalib::detect_layout(level_path).map_err(|e| e.to_string())?;
+    let engine = lunalib::engine_for_layout(layout);
 
     let mut moby_asset: Option<lunalib::MobyAsset> = None;
     let mut tie_asset: Option<lunalib::TieAsset> = None;
-    match layout {
-        LevelLayout::V2 => {
-            read_moby_assets_with_total(
+    engine
+        .read_mobys(
+            level_path,
+            Some(&[target_tuid]),
+            &mut |_: usize| {},
+            &mut |a: lunalib::MobyAsset| {
+                if a.tuid == target_tuid {
+                    moby_asset = Some(a);
+                }
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    if moby_asset.is_none() {
+        engine
+            .read_ties(
                 level_path,
                 Some(&[target_tuid]),
-                |_| {},
-                |a| {
+                &mut |_: usize| {},
+                &mut |a: lunalib::TieAsset| {
                     if a.tuid == target_tuid {
-                        moby_asset = Some(a);
+                        tie_asset = Some(a);
                     }
                 },
             )
             .map_err(|e| e.to_string())?;
-            if moby_asset.is_none() {
-                read_tie_assets_with_total(
-                    level_path,
-                    Some(&[target_tuid]),
-                    |_| {},
-                    |a| {
-                        if a.tuid == target_tuid {
-                            tie_asset = Some(a);
-                        }
-                    },
-                )
-                .map_err(|e| e.to_string())?;
-            }
-        }
-        LevelLayout::Tod => {
-            lunalib::read_moby_assets_old(level_path, |a| {
-                if a.tuid == target_tuid {
-                    moby_asset = Some(a);
-                }
-            })
-            .map_err(|e| e.to_string())?;
-            if moby_asset.is_none() {
-                lunalib::read_tie_assets_old(level_path, |a| {
-                    if a.tuid == target_tuid {
-                        tie_asset = Some(a);
-                    }
-                })
-                .map_err(|e| e.to_string())?;
-            }
-        }
-        LevelLayout::Rfom => {
-            lunalib::read_moby_assets_rfom(level_path, |a| {
-                if a.tuid == target_tuid {
-                    moby_asset = Some(a);
-                }
-            })
-            .map_err(|e| e.to_string())?;
-            if moby_asset.is_none() {
-                lunalib::read_tie_assets_rfom(level_path, |a| {
-                    if a.tuid == target_tuid {
-                        tie_asset = Some(a);
-                    }
-                })
-                .map_err(|e| e.to_string())?;
-            }
-        }
     }
 
     let asset = match moby_asset {
