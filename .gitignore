@@ -85,3 +85,17 @@ desktop.ini
 .claude
 .agents
 PROJECT_MEMORY.md
+
+# graphify knowledge graph
+# Commit the products (graph.json / graph.html / GRAPH_REPORT.md).
+# Ignore machine-specific interpreter paths, cost accounting, and the
+# regenerated-every-build AST/semantic cache.
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/.graphify_labels.json
+graphify-out/cost.json
+graphify-out/cache/
+
+# App asset cache — baked GLB/PNG derived from copyrighted game data
+_rechimera_cache/
+**/_rechimera_cache/
