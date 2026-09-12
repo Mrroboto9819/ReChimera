@@ -1,5 +1,7 @@
 use std::env;
 
+use crate::level_layout::LevelLayout;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Game {
     Rfom,
@@ -37,6 +39,14 @@ impl Game {
         }
     }
 
+    pub fn layout(self) -> LevelLayout {
+        match self {
+            Self::Rfom => LevelLayout::Rfom,
+            Self::Tod => LevelLayout::Tod,
+            Self::R2 | Self::R3 | Self::A4O | Self::ACiT | Self::FFA => LevelLayout::V2,
+        }
+    }
+
     pub fn anim_profile(self) -> AnimProfile {
         match self {
             Self::R3 => AnimProfile {
@@ -54,6 +64,19 @@ impl Game {
                 apply_delta_pos_scale: false,
                 apply_blend_mask_rotation_gate: false,
             },
+        }
+    }
+
+    pub fn matrix_convention(self) -> MatrixConvention {
+        MatrixConvention::DEFAULT
+    }
+
+    pub fn profile(self) -> GameProfile {
+        GameProfile {
+            game: Some(self),
+            layout: self.layout(),
+            anim: self.anim_profile(),
+            matrix: self.matrix_convention(),
         }
     }
 }
@@ -87,5 +110,39 @@ impl AnimProfile {
             return false;
         }
         self.apply_blend_mask_rotation_gate
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MatrixConvention {
+    pub recover_skeleton_shift_bytes: bool,
+    pub propagate_scale_frames: bool,
+    pub yard_to_meter: f32,
+}
+
+impl MatrixConvention {
+    pub const DEFAULT: MatrixConvention = MatrixConvention {
+        recover_skeleton_shift_bytes: false,
+        propagate_scale_frames: false,
+        yard_to_meter: 0.9144,
+    };
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GameProfile {
+    pub game: Option<Game>,
+    pub layout: LevelLayout,
+    pub anim: AnimProfile,
+    pub matrix: MatrixConvention,
+}
+
+impl GameProfile {
+    pub fn legacy(layout: LevelLayout) -> Self {
+        GameProfile {
+            game: None,
+            layout,
+            anim: AnimProfile::LEGACY,
+            matrix: MatrixConvention::DEFAULT,
+        }
     }
 }

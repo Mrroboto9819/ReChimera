@@ -67,7 +67,7 @@ pub use asset_lookup_extract::{
     KindOverview,
 };
 pub use assetlookup::{AssetKind, AssetLookup, AssetPointer};
-pub use game::{AnimProfile, Game};
+pub use game::{AnimProfile, Game, GameProfile, MatrixConvention};
 pub use outfitter_names::{
     find_configs_dir as find_outfitter_configs_dir,
     load_from_assetlookup as load_outfitter_names_from_assetlookup,
@@ -89,7 +89,7 @@ pub use gltf_export::{
 pub use gameplay::{read_gameplay, GameplayLayout, MobyInstance, Region};
 pub use igfile::{IgFile, SectionHeader, Version};
 pub use level_layout::{detect_layout, LevelLayout};
-pub use reader::{moby_reader, MobyReader};
+pub use reader::{moby_reader, moby_reader_for_layout, MobyReader};
 pub use moby::{
     read_moby_assets, read_moby_assets_streaming, read_moby_assets_with_total, MobyAsset,
     MobyBangle, MobyMesh,

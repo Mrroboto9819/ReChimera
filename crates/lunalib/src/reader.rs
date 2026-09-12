@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::error::Result;
+use crate::game::Game;
 use crate::level_layout::LevelLayout;
 use crate::moby::{read_moby_assets_with_total, MobyAsset};
 use crate::moby_old::read_moby_assets_old_with_total;
@@ -56,7 +57,15 @@ impl MobyReader for RfomMobyReader {
     }
 }
 
-pub fn moby_reader(layout: LevelLayout) -> Box<dyn MobyReader> {
+pub fn moby_reader(game: Game) -> Box<dyn MobyReader> {
+    reader_for_layout(game.layout())
+}
+
+pub fn moby_reader_for_layout(layout: LevelLayout) -> Box<dyn MobyReader> {
+    reader_for_layout(layout)
+}
+
+fn reader_for_layout(layout: LevelLayout) -> Box<dyn MobyReader> {
     match layout {
         LevelLayout::V2 => Box::new(V2MobyReader),
         LevelLayout::Tod => Box::new(TodMobyReader),
