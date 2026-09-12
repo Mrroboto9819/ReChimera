@@ -6,6 +6,9 @@ use crate::level_layout::LevelLayout;
 use crate::moby::{read_moby_assets_with_total, MobyAsset};
 use crate::moby_old::read_moby_assets_old_with_total;
 use crate::moby_rfom::read_moby_assets_rfom_with_total;
+use crate::tie::{read_tie_assets_with_total, TieAsset};
+use crate::tie_old::read_tie_assets_old_with_total;
+use crate::tie_rfom::read_tie_assets_rfom_with_total;
 
 pub trait MobyReader {
     fn read(
@@ -58,17 +61,75 @@ impl MobyReader for RfomMobyReader {
 }
 
 pub fn moby_reader(game: Game) -> Box<dyn MobyReader> {
-    reader_for_layout(game.layout())
+    moby_reader_for_layout(game.layout())
 }
 
 pub fn moby_reader_for_layout(layout: LevelLayout) -> Box<dyn MobyReader> {
-    reader_for_layout(layout)
-}
-
-fn reader_for_layout(layout: LevelLayout) -> Box<dyn MobyReader> {
     match layout {
         LevelLayout::V2 => Box::new(V2MobyReader),
         LevelLayout::Tod => Box::new(TodMobyReader),
         LevelLayout::Rfom => Box::new(RfomMobyReader),
+    }
+}
+
+pub trait TieReader {
+    fn read(
+        &self,
+        folder: &Path,
+        tuids: Option<&[u64]>,
+        on_total: &mut dyn FnMut(usize),
+        on_each: &mut dyn FnMut(TieAsset),
+    ) -> Result<()>;
+}
+
+struct V2TieReader;
+struct TodTieReader;
+struct RfomTieReader;
+
+impl TieReader for V2TieReader {
+    fn read(
+        &self,
+        folder: &Path,
+        tuids: Option<&[u64]>,
+        on_total: &mut dyn FnMut(usize),
+        on_each: &mut dyn FnMut(TieAsset),
+    ) -> Result<()> {
+        read_tie_assets_with_total(folder, tuids, |n| on_total(n), |a| on_each(a))
+    }
+}
+
+impl TieReader for TodTieReader {
+    fn read(
+        &self,
+        folder: &Path,
+        _tuids: Option<&[u64]>,
+        on_total: &mut dyn FnMut(usize),
+        on_each: &mut dyn FnMut(TieAsset),
+    ) -> Result<()> {
+        read_tie_assets_old_with_total(folder, |n| on_total(n), |a| on_each(a))
+    }
+}
+
+impl TieReader for RfomTieReader {
+    fn read(
+        &self,
+        folder: &Path,
+        _tuids: Option<&[u64]>,
+        on_total: &mut dyn FnMut(usize),
+        on_each: &mut dyn FnMut(TieAsset),
+    ) -> Result<()> {
+        read_tie_assets_rfom_with_total(folder, |n| on_total(n), |a| on_each(a))
+    }
+}
+
+pub fn tie_reader(game: Game) -> Box<dyn TieReader> {
+    tie_reader_for_layout(game.layout())
+}
+
+pub fn tie_reader_for_layout(layout: LevelLayout) -> Box<dyn TieReader> {
+    match layout {
+        LevelLayout::V2 => Box::new(V2TieReader),
+        LevelLayout::Tod => Box::new(TodTieReader),
+        LevelLayout::Rfom => Box::new(RfomTieReader),
     }
 }

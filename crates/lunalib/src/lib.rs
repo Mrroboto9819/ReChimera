@@ -34,6 +34,7 @@ pub mod igfile;
 pub mod level_layout;
 pub mod math;
 pub mod reader;
+pub mod engine;
 pub mod moby;
 pub mod moby_old;
 pub mod moby_rfom;
@@ -89,7 +90,10 @@ pub use gltf_export::{
 pub use gameplay::{read_gameplay, GameplayLayout, MobyInstance, Region};
 pub use igfile::{IgFile, SectionHeader, Version};
 pub use level_layout::{detect_layout, LevelLayout};
-pub use reader::{moby_reader, moby_reader_for_layout, MobyReader};
+pub use reader::{
+    moby_reader, moby_reader_for_layout, tie_reader, tie_reader_for_layout, MobyReader, TieReader,
+};
+pub use engine::{engine_for, engine_for_layout, GameEngine};
 pub use moby::{
     read_moby_assets, read_moby_assets_streaming, read_moby_assets_with_total, MobyAsset,
     MobyBangle, MobyMesh,
