@@ -10,7 +10,7 @@ use lunalib::{
     animation_section_offsets, decode_animation, decode_animation_with_skel, AnimProfile, Game,
     decode_animation_with_skeleton, detect_layout,
     read_animation_control, read_animation_header_at,
-    read_shaders, read_tie_assets_with_total, read_zones, AssetKind,
+    read_shaders, read_tie_assets_with_total, AssetKind,
     AssetLookup, DecodedClip, IgFile, LevelLayout, ShaderInfo, Skeleton, UFrag, Zone,
 };
 use serde::{Deserialize, Serialize};
@@ -1884,18 +1884,12 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
     eprintln!("[cache] -> phase ufrags");
     let zones: Vec<Zone> = if debug_filter.is_some() {
         Vec::new()
-    } else { match layout {
-        LevelLayout::V2 => match read_zones(level_path) {
-            Ok(z) => z,
-            Err(e) => {
-                eprintln!("warn: read_zones failed: {e}; skipping ufrag cache phase");
-                Vec::new()
-            }
-        },
-        LevelLayout::Tod => match lunalib::read_zones_old(level_path) {
+    } else {
+        match lunalib::engine_for_layout(layout).read_zones(level_path) {
             Ok(z) => {
                 eprintln!(
-                    "[cache] TOD layout: read {} zone(s) with {} tie instances, {} ufrags",
+                    "[cache] {} layout: read {} zone(s) with {} tie instances, {} ufrags",
+                    layout.tag(),
                     z.len(),
                     z.iter().map(|x| x.tie_instances.len()).sum::<usize>(),
                     z.iter().map(|x| x.ufrags.len()).sum::<usize>()
@@ -1903,27 +1897,14 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
                 z
             }
             Err(e) => {
-                eprintln!("warn: TOD zone read failed ({e}); skipping ufrag/tie-instance phase");
+                eprintln!(
+                    "warn: {} zone read failed ({e}); skipping ufrag phase",
+                    layout.tag()
+                );
                 Vec::new()
             }
-        },
-        LevelLayout::Rfom => {
-            match lunalib::read_regions_rfom(level_path) {
-                Ok(z) => {
-                    eprintln!(
-                        "[cache] RFOM layout: read {} synthetic zone(s) with {} ufrags",
-                        z.len(),
-                        z.iter().map(|x| x.ufrags.len()).sum::<usize>()
-                    );
-                    z
-                }
-                Err(e) => {
-                    eprintln!("warn: RFOM region read failed ({e}); skipping ufrag phase");
-                    Vec::new()
-                }
-            }
         }
-    } };
+    };
 
     let mut total_ufrags = 0usize;
     for z in &zones {

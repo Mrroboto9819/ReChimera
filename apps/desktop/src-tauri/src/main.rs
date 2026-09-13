@@ -16,7 +16,7 @@ use lunalib::{
     bulk_extract_pngs, decode_animation, downsample_rgba, encode_png, extract_bank_sounds_for_file, extract_stream_sounds,
     list_sounds as list_sounds_in, read_animation_control, read_animation_header, read_gameplay,
     read_moby_assets_with_total, read_shaders, read_textures_with_total,
-    read_tie_assets_with_total, read_zones, read_zones_streaming, AssetKind, AssetLookup,
+    read_tie_assets_with_total, read_zones, AssetKind, AssetLookup,
     AssetPointer, IgFile, ShaderInfo, SoundKind,
 };
 use serde::{Deserialize, Serialize};
@@ -482,9 +482,8 @@ fn level_layout(folder: String) -> Result<LevelLayoutDto, String> {
 pub(crate) fn real_moby_layout(folder: &str) -> Option<Vec<InstanceDto>> {
     let path = Path::new(folder);
     let layout = match lunalib::detect_layout(path) {
-        Ok(lunalib::LevelLayout::Tod) => lunalib::read_gameplay_old(path).ok()?,
-        Ok(lunalib::LevelLayout::Rfom) => lunalib::read_gameplay_rfom(path).ok()?,
-        _ => read_gameplay(path).ok()?,
+        Ok(l) => lunalib::engine_for_layout(l).read_gameplay(path).ok()?,
+        Err(_) => read_gameplay(path).ok()?,
     };
     let mut out = Vec::new();
     for region in layout.regions {
@@ -626,9 +625,9 @@ fn foliage_instance_dto(inst: &lunalib::TieInstance) -> InstanceDto {
 fn real_ufrag_bounds(folder: &str) -> Option<Vec<UFragDto>> {
     let path = Path::new(folder);
     let zones = match lunalib::detect_layout(path) {
-        Ok(lunalib::LevelLayout::Rfom) => lunalib::read_regions_rfom(path).ok()?,
         Ok(lunalib::LevelLayout::Tod) => return None,
-        _ => read_zones(path).ok()?,
+        Ok(l) => lunalib::engine_for_layout(l).read_zones(path).ok()?,
+        Err(_) => read_zones(path).ok()?,
     };
     let mut out = Vec::new();
     for zone in zones {
@@ -714,8 +713,8 @@ fn run_level_stream(folder: &str, on_event: &Channel<LevelEvent>) -> Result<(), 
     let mut tie_tuids: HashSet<u64> = HashSet::new();
 
     let gameplay_layout = match lunalib::detect_layout(path) {
-        Ok(lunalib::LevelLayout::Tod) => lunalib::read_gameplay_old(path).ok(),
-        _ => read_gameplay(path).ok(),
+        Ok(l) => lunalib::engine_for_layout(l).read_gameplay(path).ok(),
+        Err(_) => read_gameplay(path).ok(),
     };
     if let Some(layout) = gameplay_layout {
         for region in layout.regions {
@@ -727,23 +726,24 @@ fn run_level_stream(folder: &str, on_event: &Channel<LevelEvent>) -> Result<(), 
 
 
     let mut zones: Vec<lunalib::Zone> = Vec::new();
-    match lunalib::detect_layout(path) {
-        Ok(lunalib::LevelLayout::Tod) => {
-            for z in lunalib::read_zones_old(path).unwrap_or_default() {
+    let layout_hint = lunalib::detect_layout(path);
+    let zone_read = match &layout_hint {
+        Ok(l) => lunalib::engine_for_layout(*l).read_zones(path),
+        Err(_) => read_zones(path),
+    };
+    match zone_read {
+        Ok(zs) => {
+            for z in zs {
                 for inst in &z.tie_instances {
                     tie_tuids.insert(inst.tie_tuid);
                 }
                 zones.push(z);
             }
         }
-        _ => {
-            read_zones_streaming(path, |z| {
-                for inst in &z.tie_instances {
-                    tie_tuids.insert(inst.tie_tuid);
-                }
-                zones.push(z);
-            })
-            .map_err(|e| e.to_string())?;
+        Err(e) => {
+            if !matches!(layout_hint, Ok(lunalib::LevelLayout::Tod)) {
+                return Err(e.to_string());
+            }
         }
     }
 

@@ -3,11 +3,14 @@ use std::path::Path;
 
 use crate::error::Result;
 use crate::game::{Game, GameProfile};
+use crate::gameplay::GameplayLayout;
 use crate::level_layout::LevelLayout;
 use crate::moby::MobyAsset;
 use crate::reader::{moby_reader_for_layout, tie_reader_for_layout};
 use crate::shader::ShaderInfo;
+use crate::texture::Texture;
 use crate::tie::TieAsset;
+use crate::zone::Zone;
 
 pub struct GameEngine {
     profile: GameProfile,
@@ -67,6 +70,30 @@ impl GameEngine {
             LevelLayout::V2 => crate::shader::read_shaders(folder),
             LevelLayout::Tod => crate::shader_old::read_shaders_old(folder),
             LevelLayout::Rfom => crate::shader_rfom::read_shaders_rfom(folder),
+        }
+    }
+
+    pub fn read_gameplay(&self, folder: &Path) -> Result<GameplayLayout> {
+        match self.profile.layout {
+            LevelLayout::V2 => crate::gameplay::read_gameplay(folder),
+            LevelLayout::Tod => crate::gameplay_old::read_gameplay_old(folder),
+            LevelLayout::Rfom => crate::gameplay_rfom::read_gameplay_rfom(folder),
+        }
+    }
+
+    pub fn read_zones(&self, folder: &Path) -> Result<Vec<Zone>> {
+        match self.profile.layout {
+            LevelLayout::V2 => crate::zone::read_zones(folder),
+            LevelLayout::Tod => crate::zone_old::read_zones_old(folder),
+            LevelLayout::Rfom => crate::region_rfom::read_regions_rfom(folder),
+        }
+    }
+
+    pub fn read_textures(&self, folder: &Path) -> Result<Vec<Texture>> {
+        match self.profile.layout {
+            LevelLayout::V2 => crate::texture::read_textures(folder),
+            LevelLayout::Tod => crate::texture_old::read_textures_old(folder),
+            LevelLayout::Rfom => crate::texture_rfom::read_textures_rfom(folder),
         }
     }
 }
