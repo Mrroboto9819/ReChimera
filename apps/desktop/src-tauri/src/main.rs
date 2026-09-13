@@ -2,6 +2,7 @@
 
 mod cache;
 mod dto;
+mod export_cmds;
 mod animset_cmds;
 mod assetlookup_cmds;
 mod gltf_cmds;
@@ -1523,17 +1524,17 @@ fn main() {
             cache::read_cached_manifest,
             cache::read_cached_asset,
             cache::read_cached_bytes,
-            cache::export_cached_moby_glb,
-            cache::export_skybox,
-            cache::read_cached_skybox_meta,
-            cache::export_moby_glb_with_options,
-            cache::export_moby_fbx_with_options,
+            export_cmds::export_cached_moby_glb,
+            export_cmds::export_skybox,
+            export_cmds::read_cached_skybox_meta,
+            export_cmds::export_moby_glb_with_options,
+            export_cmds::export_moby_fbx_with_options,
             animset_cmds::list_animsets,
             animset_cmds::decode_animset_clip,
-            cache::export_level_glb,
-            cache::export_level_fbx,
-            cache::export_texture_png,
-            cache::export_texture_dds,
+            export_cmds::export_level_glb,
+            export_cmds::export_level_fbx,
+            export_cmds::export_texture_png,
+            export_cmds::export_texture_dds,
             level_layout,
             level_meshes_stream,
             level_character_library_stream,
