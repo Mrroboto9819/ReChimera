@@ -99,3 +99,6 @@ graphify-out/cache/
 # App asset cache — baked GLB/PNG derived from copyrighted game data
 _rechimera_cache/
 **/_rechimera_cache/
+
+# Local game-data locations for integration fingerprinting — machine-specific
+test-levels.toml

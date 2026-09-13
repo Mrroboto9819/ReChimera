@@ -1,0 +1,7 @@
+layout=rfom
+mobys count=183 verts=434340 indices=1362153 skel_bones=3258 hash=F74CE3BEB00D0BE5
+ties count=151 verts=680017 hash=8C89B0F4BBF23809
+shaders count=666 hash=C3CED8021DCE75A6
+textures count=1488 rgba_bytes=726608128 hash=B2C8856C456E1312
+zones count=1 tie_instances=0 ufrags=1358 hash=E65252DF4797664E
+gameplay regions=1 moby_instances=1373 hash=0A8DC9C11AD4FEF5
