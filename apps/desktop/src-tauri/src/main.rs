@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cache;
+mod dto;
 mod r2;
+
+pub(crate) use dto::*;
 
 use std::fs::File;
 use std::io::BufReader;
@@ -19,125 +22,9 @@ use lunalib::{
     read_tie_assets_with_total, read_zones, AssetKind, AssetLookup,
     AssetPointer, IgFile, ShaderInfo, SoundKind,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::State;
-
-#[derive(Serialize, Clone)]
-struct SectionDto {
-    id: u32,
-    offset: u32,
-    count: u32,
-    length: u32,
-}
-
-#[derive(Serialize)]
-struct AssetCount {
-    kind: &'static str,
-    section_id: u32,
-    count: usize,
-    present: bool,
-}
-
-#[derive(Serialize)]
-struct LevelSummary {
-    folder: String,
-    version_major: u16,
-    version_minor: u16,
-    sections: Vec<SectionDto>,
-    asset_counts: Vec<AssetCount>,
-}
-
-#[derive(Serialize)]
-struct AssetPointerDto {
-
-    tuid: String,
-    offset: u32,
-    length: u32,
-}
-
-#[derive(Serialize)]
-pub(crate) struct InstanceDto {
-    pub(crate) tuid: String,
-    pub(crate) asset_tuid: String,
-    pub(crate) kind: &'static str,
-    pub(crate) name: String,
-    pub(crate) position: [f32; 3],
-    pub(crate) quaternion: [f32; 4],
-    pub(crate) scale: [f32; 3],
-}
-
-#[derive(Serialize)]
-struct UFragDto {
-    tuid: String,
-    zone_tuid: String,
-    position: [f32; 3],
-    radius: f32,
-    vertex_count: u16,
-    triangle_count: u16,
-}
-
-#[derive(Serialize)]
-struct LevelLayoutDto {
-    instances: Vec<InstanceDto>,
-    ufrags: Vec<UFragDto>,
-}
-
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct MeshDto {
-    pub positions_b64: String,
-    pub uvs_b64: String,
-    pub indices_b64: String,
-    pub albedo_id: Option<u32>,
-    pub normal_id: Option<u32>,
-    pub emissive_id: Option<u32>,
-    pub bone_indices_b64: String,
-    pub bone_weights_b64: String,
-}
-
-
-#[derive(Serialize)]
-struct TextureDto {
-    id: u32,
-    width: u32,
-    height: u32,
-}
-
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct SkeletonDto {
-    bone_count: usize,
-    root_bone: u16,
-    parents: Vec<i16>,
-    bind_local: Vec<[f32; 16]>,
-    bind_world_inverse: Vec<[f32; 16]>,
-    tms0_col: Vec<[f32; 16]>,
-    tms1_col: Vec<[f32; 16]>,
-    scale_shift: u16,
-    translation_shift: u16,
-}
-
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct AssetMeshesDto {
-    pub(crate) asset_tuid: String,
-    pub(crate) name: String,
-    pub(crate) submeshes: Vec<MeshDto>,
-    pub(crate) skeleton: Option<SkeletonDto>,
-    pub(crate) animset_hash: Option<String>,
-    pub(crate) bind_pose_inverse_offset: i16,
-    #[serde(default)]
-    pub(crate) embedded_animation_count: u32,
-}
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct UFragMeshDto {
-    pub tuid: String,
-    pub zone_tuid: String,
-    pub position: [f32; 3],
-    pub mesh: MeshDto,
-}
 
 fn encode_f32_buffer(values: &[f32]) -> String {
     let mut bytes = Vec::with_capacity(values.len() * std::mem::size_of::<f32>());
