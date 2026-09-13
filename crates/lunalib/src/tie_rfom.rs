@@ -38,9 +38,10 @@
 //! - `+0x10` `u8`  useUv2
 //! - `+0x11..+0x20` unk
 
-use std::fs::File;
-use std::io::{BufReader, Read, Seek};
+use std::io::{Cursor, Read, Seek};
 use std::path::Path;
+
+use rayon::prelude::*;
 
 use crate::error::{Error, Result};
 use crate::igfile::IgFile;
@@ -74,7 +75,8 @@ where
     F: FnMut(TieAsset),
 {
     let main_path = level_folder.join("ps3levelmain.dat");
-    let mut main_ig = IgFile::open(BufReader::new(File::open(&main_path)?))?;
+    let main_bytes = std::fs::read(&main_path)?;
+    let main_ig = IgFile::open(Cursor::new(main_bytes.as_slice()))?;
 
     let global_material_count = main_ig
         .section(SECT_MATERIAL_V1)
@@ -94,12 +96,13 @@ where
     }
 
     let verts_path = level_folder.join("ps3levelverts.dat");
-    let mut verts_ig = IgFile::open(BufReader::new(File::open(&verts_path).map_err(|e| {
+    let vert_bytes = std::fs::read(&verts_path).map_err(|e| {
         Error::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("ps3levelverts.dat is required for RFOM ties: {e}"),
         ))
-    })?))?;
+    })?;
+    let verts_ig = IgFile::open(Cursor::new(vert_bytes.as_slice()))?;
     let vertex_section = verts_ig
         .section(SECT_LEVEL_VERTEX_BUFFER)
         .ok_or(Error::SectionNotFound(SECT_LEVEL_VERTEX_BUFFER))?;
@@ -112,18 +115,35 @@ where
     if std::env::var("RECHIMERA_LOG_PROBES").is_ok() {
         eprintln!("[rfom] ties section: {count} ties");
     }
-    for i in 0..count {
-        let header_off = u64::from(tie_section.offset) + (i as u64) * RFOM_TIE_HEADER_SIZE;
-        match parse_one(
-            &mut main_ig,
-            &mut verts_ig,
-            header_off,
-            u64::from(vertex_section.offset),
-            u64::from(index_section.offset),
-            u64::from(vertex_section.length),
-            u64::from(index_section.length),
-            global_material_count,
-        ) {
+    let section_offset = u64::from(tie_section.offset);
+    let v_off = u64::from(vertex_section.offset);
+    let i_off = u64::from(index_section.offset);
+    let v_len = u64::from(vertex_section.length);
+    let i_len = u64::from(index_section.length);
+    let mut parsed: Vec<(usize, Result<Option<TieAsset>>)> = (0..count)
+        .into_par_iter()
+        .map(|i| {
+            let header_off = section_offset + (i as u64) * RFOM_TIE_HEADER_SIZE;
+            let result = (|| {
+                let mut mig = IgFile::open(Cursor::new(main_bytes.as_slice()))?;
+                let mut vig = IgFile::open(Cursor::new(vert_bytes.as_slice()))?;
+                parse_one(
+                    &mut mig,
+                    &mut vig,
+                    header_off,
+                    v_off,
+                    i_off,
+                    v_len,
+                    i_len,
+                    global_material_count,
+                )
+            })();
+            (i, result)
+        })
+        .collect();
+    parsed.sort_by_key(|(i, _)| *i);
+    for (i, result) in parsed {
+        match result {
             Ok(Some(asset)) => on_each(asset),
             Ok(None) => {}
             Err(e) => {

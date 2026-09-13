@@ -1,6 +1,8 @@
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
+
+use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::{Error, Result};
@@ -37,7 +39,8 @@ where
     F: FnMut(MobyAsset),
 {
     let main_path = level_folder.join("main.dat");
-    let mut main_ig = IgFile::open(BufReader::new(File::open(&main_path)?))?;
+    let main_bytes = std::fs::read(&main_path)?;
+    let main_ig = IgFile::open(Cursor::new(main_bytes.as_slice()))?;
 
     let global_shader_count = main_ig.section(0x5000).map(|s| s.count).unwrap_or(0) as usize;
     let identity_shader_tuids: Vec<u64> = (0..global_shader_count as u64).collect();
@@ -93,19 +96,31 @@ where
             );
         }
     }
-    for i in 0..count {
-        let base = u64::from(moby_section.offset) + (i as u64) * OLD_MOBY_HEADER_SIZE;
-        match parse_one(
-            &mut main_ig,
-            base,
-            i,
-            &vertices_dat_path,
-            &textures_dat_path,
-            vertices_geom_offset,
-            indices_geom_offset,
-            &identity_shader_tuids,
-            log_probes,
-        ) {
+    let section_offset = u64::from(moby_section.offset);
+    let mut parsed: Vec<(usize, Result<MobyAsset>)> = (0..count)
+        .into_par_iter()
+        .map(|i| {
+            let base = section_offset + (i as u64) * OLD_MOBY_HEADER_SIZE;
+            let result = (|| {
+                let mut ig = IgFile::open(Cursor::new(main_bytes.as_slice()))?;
+                parse_one(
+                    &mut ig,
+                    base,
+                    i,
+                    &vertices_dat_path,
+                    &textures_dat_path,
+                    vertices_geom_offset,
+                    indices_geom_offset,
+                    &identity_shader_tuids,
+                    log_probes,
+                )
+            })();
+            (i, result)
+        })
+        .collect();
+    parsed.sort_by_key(|(i, _)| *i);
+    for (i, result) in parsed {
+        match result {
             Ok(asset) => on_each(asset),
             Err(e) => {
                 eprintln!("warn: TOD moby[{i}] skipped — parse failed: {e}");

@@ -1,6 +1,8 @@
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
+
+use rayon::prelude::*;
 
 use crate::error::{Error, Result};
 use crate::igfile::IgFile;
@@ -31,7 +33,8 @@ where
     F: FnMut(MobyAsset),
 {
     let main_path = level_folder.join("ps3levelmain.dat");
-    let mut main_ig = IgFile::open(BufReader::new(File::open(&main_path)?))?;
+    let main_bytes = std::fs::read(&main_path)?;
+    let main_ig = IgFile::open(Cursor::new(main_bytes.as_slice()))?;
 
     let global_material_count = main_ig
         .section(SECT_MATERIAL_V1)
@@ -63,17 +66,29 @@ where
 
     let count = moby_section.count as usize;
     on_total(count);
+    let section_offset = u64::from(moby_section.offset);
+    let mut parsed: Vec<(usize, Result<Option<MobyAsset>>)> = (0..count)
+        .into_par_iter()
+        .map(|i| {
+            let header_off = section_offset + (i as u64) * RFOM_MOBY_HEADER_SIZE;
+            let result = (|| {
+                let mut ig = IgFile::open(Cursor::new(main_bytes.as_slice()))?;
+                parse_one(
+                    &mut ig,
+                    header_off,
+                    i,
+                    &texs_path,
+                    texs_size,
+                    &identity_shader_tuids,
+                )
+            })();
+            (i, result)
+        })
+        .collect();
+    parsed.sort_by_key(|(i, _)| *i);
     let mut skipped_empty = 0usize;
-    for i in 0..count {
-        let header_off = u64::from(moby_section.offset) + (i as u64) * RFOM_MOBY_HEADER_SIZE;
-        match parse_one(
-            &mut main_ig,
-            header_off,
-            i,
-            &texs_path,
-            texs_size,
-            &identity_shader_tuids,
-        ) {
+    for (i, result) in parsed {
+        match result {
             Ok(Some(asset)) => on_each(asset),
             Ok(None) => skipped_empty += 1,
             Err(e) => {
