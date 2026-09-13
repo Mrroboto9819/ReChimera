@@ -194,3 +194,22 @@ pub(crate) fn build_skeleton_dto(skel: &Option<lunalib::Skeleton>) -> Option<Ske
         translation_shift: s.translation_shift,
     })
 }
+
+#[derive(Serialize)]
+pub struct DecodedBoneDto {
+    pub rotations: Vec<f32>,
+    pub translations: Vec<f32>,
+    pub scales: Vec<f32>,
+    pub rotation_animated: bool,
+    pub translation_animated: bool,
+    pub scale_animated: bool,
+}
+
+#[derive(Serialize)]
+pub struct DecodedClipDto {
+    pub name: String,
+    pub num_frames: u16,
+    pub frame_rate: f32,
+    pub looping: bool,
+    pub bones: Vec<DecodedBoneDto>,
+}

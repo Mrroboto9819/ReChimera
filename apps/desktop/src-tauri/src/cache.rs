@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 
 use crate::{
-    build_skeleton_dto, mesh_dto, resolve_shader_textures, AssetMeshesDto, UFragMeshDto,
+    build_skeleton_dto, mesh_dto, resolve_shader_textures, AssetMeshesDto, DecodedBoneDto,
+    DecodedClipDto, UFragMeshDto,
 };
 
 const CACHE_DIR_NAME: &str = "_rechimera_cache";
@@ -4065,24 +4066,6 @@ pub struct AnimsetSummary {
     pub clips: Vec<AnimsetClipMeta>,
 }
 
-#[derive(Serialize)]
-pub struct DecodedBoneDto {
-    pub rotations: Vec<f32>,
-    pub translations: Vec<f32>,
-    pub scales: Vec<f32>,
-    pub rotation_animated: bool,
-    pub translation_animated: bool,
-    pub scale_animated: bool,
-}
-
-#[derive(Serialize)]
-pub struct DecodedClipDto {
-    pub name: String,
-    pub num_frames: u16,
-    pub frame_rate: f32,
-    pub looping: bool,
-    pub bones: Vec<DecodedBoneDto>,
-}
 
 #[tauri::command]
 pub fn decode_animset_clip(

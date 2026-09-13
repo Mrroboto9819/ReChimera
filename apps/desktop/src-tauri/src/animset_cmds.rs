@@ -3,31 +3,9 @@ use std::fs::File;
 use std::path::Path;
 
 use lunalib::{decode_animation, read_animation_control, read_animation_header, AssetKind, IgFile};
-use crate::open_lookup;
+use crate::{open_lookup, DecodedBoneDto, DecodedClipDto};
 use serde::Serialize;
 
-#[derive(Serialize)]
-pub(crate) struct DecodedBoneDto {
-
-    rotations: Vec<f32>,
-
-    translations: Vec<f32>,
-    scales: Vec<f32>,
-    rotation_animated: bool,
-    translation_animated: bool,
-    scale_animated: bool,
-}
-
-
-#[derive(Serialize)]
-pub(crate) struct DecodedClipDto {
-    name: String,
-    num_frames: u16,
-    frame_rate: f32,
-    looping: bool,
-
-    bones: Vec<DecodedBoneDto>,
-}
 
 
 
