@@ -16,6 +16,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+rayon.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-os = "2"
 tauri-plugin-dialog = "2"

@@ -2278,18 +2278,20 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
         }
         LevelLayout::Tod => match lunalib::read_textures_old(level_path) {
             Ok(textures) => {
+                use rayon::prelude::*;
                 let needed: HashSet<u32> = needed_ids.iter().copied().collect();
-                let mut out: Vec<(u32, Vec<u8>)> = Vec::new();
-                for t in &textures {
-                    if !needed.contains(&t.id) {
-                        continue;
-                    }
-                    if let Some(png) = lunalib::texture_to_png(t) {
-                        let resized =
-                            lunalib::downsample_png_to(&png, TEXTURE_MAX_DIM).unwrap_or(png);
-                        out.push((t.id, resized));
-                    }
-                }
+                let mut out: Vec<(u32, Vec<u8>)> = textures
+                    .par_iter()
+                    .filter(|t| needed.contains(&t.id))
+                    .filter_map(|t| {
+                        lunalib::texture_to_png(t).map(|png| {
+                            let resized = lunalib::downsample_png_to(&png, TEXTURE_MAX_DIM)
+                                .unwrap_or(png);
+                            (t.id, resized)
+                        })
+                    })
+                    .collect();
+                out.sort_by_key(|(id, _)| *id);
                 eprintln!(
                     "[cache] TOD layout: encoded {} / {} requested textures",
                     out.len(),
@@ -2304,18 +2306,20 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
         },
         LevelLayout::Rfom => match lunalib::read_textures_rfom(level_path) {
             Ok(textures) => {
+                use rayon::prelude::*;
                 let needed: HashSet<u32> = needed_ids.iter().copied().collect();
-                let mut out: Vec<(u32, Vec<u8>)> = Vec::new();
-                for t in &textures {
-                    if !needed.contains(&t.id) {
-                        continue;
-                    }
-                    if let Some(png) = lunalib::texture_rfom_to_png(t) {
-                        let resized =
-                            lunalib::downsample_png_to(&png, TEXTURE_MAX_DIM).unwrap_or(png);
-                        out.push((t.id, resized));
-                    }
-                }
+                let mut out: Vec<(u32, Vec<u8>)> = textures
+                    .par_iter()
+                    .filter(|t| needed.contains(&t.id))
+                    .filter_map(|t| {
+                        lunalib::texture_rfom_to_png(t).map(|png| {
+                            let resized = lunalib::downsample_png_to(&png, TEXTURE_MAX_DIM)
+                                .unwrap_or(png);
+                            (t.id, resized)
+                        })
+                    })
+                    .collect();
+                out.sort_by_key(|(id, _)| *id);
                 eprintln!(
                     "[cache] RFOM layout: encoded {} / {} requested textures",
                     out.len(),

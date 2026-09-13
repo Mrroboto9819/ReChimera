@@ -162,21 +162,22 @@ pub fn export_moby_glb_with_options(
                 },
                 LevelLayout::Tod => match lunalib::read_textures_old(level_path) {
                     Ok(textures) => {
+                        use rayon::prelude::*;
                         let want: HashSet<u32> = needed.iter().copied().collect();
-                        let mut out: HashMap<u32, Vec<u8>> = HashMap::new();
-                        for t in &textures {
-                            if !want.contains(&t.id) {
-                                continue;
-                            }
-                            if let Some(png) = lunalib::texture_to_png(t) {
-                                let resized = if max_dim != 0 && max_dim < u32::MAX {
-                                    lunalib::downsample_png_to(&png, max_dim).unwrap_or(png)
-                                } else {
-                                    png
-                                };
-                                out.insert(t.id, resized);
-                            }
-                        }
+                        let out: HashMap<u32, Vec<u8>> = textures
+                            .par_iter()
+                            .filter(|t| want.contains(&t.id))
+                            .filter_map(|t| {
+                                lunalib::texture_to_png(t).map(|png| {
+                                    let resized = if max_dim != 0 && max_dim < u32::MAX {
+                                        lunalib::downsample_png_to(&png, max_dim).unwrap_or(png)
+                                    } else {
+                                        png
+                                    };
+                                    (t.id, resized)
+                                })
+                            })
+                            .collect();
                         out
                     }
                     Err(e) => {
@@ -186,21 +187,22 @@ pub fn export_moby_glb_with_options(
                 },
                 LevelLayout::Rfom => match lunalib::read_textures_rfom(level_path) {
                     Ok(textures) => {
+                        use rayon::prelude::*;
                         let want: HashSet<u32> = needed.iter().copied().collect();
-                        let mut out: HashMap<u32, Vec<u8>> = HashMap::new();
-                        for t in &textures {
-                            if !want.contains(&t.id) {
-                                continue;
-                            }
-                            if let Some(png) = lunalib::texture_rfom_to_png(t) {
-                                let resized = if max_dim != 0 && max_dim < u32::MAX {
-                                    lunalib::downsample_png_to(&png, max_dim).unwrap_or(png)
-                                } else {
-                                    png
-                                };
-                                out.insert(t.id, resized);
-                            }
-                        }
+                        let out: HashMap<u32, Vec<u8>> = textures
+                            .par_iter()
+                            .filter(|t| want.contains(&t.id))
+                            .filter_map(|t| {
+                                lunalib::texture_rfom_to_png(t).map(|png| {
+                                    let resized = if max_dim != 0 && max_dim < u32::MAX {
+                                        lunalib::downsample_png_to(&png, max_dim).unwrap_or(png)
+                                    } else {
+                                        png
+                                    };
+                                    (t.id, resized)
+                                })
+                            })
+                            .collect();
                         out
                     }
                     Err(e) => {

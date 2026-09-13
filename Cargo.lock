@@ -3041,6 +3041,7 @@ dependencies = [
  "image",
  "lunalib",
  "psarc",
+ "rayon",
  "serde",
  "serde_json",
  "tauri",
