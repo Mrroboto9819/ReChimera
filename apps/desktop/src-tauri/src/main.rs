@@ -2,7 +2,9 @@
 
 mod cache;
 mod dto;
+mod animset_cmds;
 mod assetlookup_cmds;
+mod gltf_cmds;
 mod psarc_cmds;
 mod r2;
 mod sound_cmds;
@@ -19,11 +21,11 @@ use std::collections::{HashMap, HashSet};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lunalib::math::zyx_euler_to_quat;
 use lunalib::{
-    bulk_extract_pngs, decode_animation, downsample_rgba, encode_png,
-    read_animation_control, read_animation_header, read_gameplay,
+    bulk_extract_pngs, downsample_rgba, encode_png,
+    read_gameplay,
     read_moby_assets_with_total, read_shaders, read_textures_with_total,
     read_tie_assets_with_total, read_zones, AssetKind, AssetLookup,
-    AssetPointer, IgFile, ShaderInfo,
+    AssetPointer, ShaderInfo,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -130,7 +132,7 @@ fn assetlookup_path(folder: &str) -> PathBuf {
     Path::new(folder).join("assetlookup.dat")
 }
 
-fn open_lookup(folder: &str) -> Result<AssetLookup<BufReader<File>>, String> {
+pub(crate) fn open_lookup(folder: &str) -> Result<AssetLookup<BufReader<File>>, String> {
     let path = assetlookup_path(folder);
     let file = File::open(&path).map_err(|e| format!("open {}: {e}", path.display()))?;
     AssetLookup::open(BufReader::new(file)).map_err(|e| e.to_string())
@@ -1176,7 +1178,7 @@ fn find_character_library(level_path: &Path) -> Option<std::path::PathBuf> {
 }
 
 
-fn find_gltf_library_dir(level_path: &Path) -> Option<std::path::PathBuf> {
+pub(crate) fn find_gltf_library_dir(level_path: &Path) -> Option<std::path::PathBuf> {
     let candidates = character_library_candidates(level_path);
     eprintln!(
         "find_gltf_library_dir: trying {} candidates from level={}",
@@ -1350,200 +1352,6 @@ fn write_bytes(path: String, bytes: Vec<u8>) -> Result<(), String> {
 }
 
 
-#[derive(Serialize)]
-struct GltfFileDto {
-
-    name: String,
-
-    path: String,
-
-    extension: String,
-    size_bytes: u64,
-
-    category: String,
-}
-
-#[derive(Serialize)]
-struct GltfLibraryDto {
-
-    folder: String,
-    files: Vec<GltfFileDto>,
-}
-
-
-#[tauri::command]
-fn list_character_gltfs(folder: String) -> Result<GltfLibraryDto, String> {
-    let level_path = Path::new(&folder);
-
-    let Some(char_path) = find_gltf_library_dir(level_path) else {
-        eprintln!(
-            "list_character_gltfs: no character/ directory found near {}",
-            level_path.display()
-        );
-        return Ok(GltfLibraryDto {
-            folder: String::new(),
-            files: Vec::new(),
-        });
-    };
-
-    eprintln!(
-        "list_character_gltfs: scanning {}",
-        char_path.display()
-    );
-    let mut files: Vec<GltfFileDto> = Vec::new();
-    walk_gltf(&char_path, "character", &mut files).map_err(|e| e.to_string())?;
-    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-    eprintln!(
-        "list_character_gltfs: found {} files at {}",
-        files.len(),
-        char_path.display()
-    );
-
-    Ok(GltfLibraryDto {
-        folder: char_path.display().to_string(),
-        files,
-    })
-}
-
-fn walk_gltf(dir: &Path, category: &str, out: &mut Vec<GltfFileDto>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let ftype = entry.file_type()?;
-        if ftype.is_dir() {
-            walk_gltf(&path, category, out)?;
-        } else if ftype.is_file() {
-            let ext = path
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_lowercase());
-            if matches!(ext.as_deref(), Some("gltf") | Some("glb")) {
-                let name = path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                out.push(GltfFileDto {
-                    name,
-                    path: path.display().to_string(),
-                    extension: ext.unwrap_or_default(),
-                    size_bytes: size,
-                    category: category.to_string(),
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-
-fn find_entities_dir(level_path: &Path) -> Option<std::path::PathBuf> {
-    let mut candidates: Vec<std::path::PathBuf> = vec![level_path.join("entities")];
-    let mut cur = level_path.parent().map(|p| p.to_path_buf());
-    for _ in 0..15 {
-        let Some(p) = cur.clone() else { break };
-        candidates.push(p.join("entities"));
-        cur = p.parent().map(|x| x.to_path_buf());
-    }
-    eprintln!(
-        "find_entities_dir: trying {} candidates from level={}",
-        candidates.len(),
-        level_path.display()
-    );
-    for (i, c) in candidates.iter().enumerate() {
-        let exists = c.is_dir();
-        eprintln!(
-            "  [{}] {} — {}",
-            i,
-            c.display(),
-            if exists { "MATCH" } else { "miss" }
-        );
-        if exists {
-            return Some(c.clone());
-        }
-    }
-    None
-}
-
-
-#[tauri::command]
-fn list_entities_gltfs(folder: String) -> Result<GltfLibraryDto, String> {
-    let level_path = Path::new(&folder);
-    let Some(entities_root) = find_entities_dir(level_path) else {
-        eprintln!(
-            "list_entities_gltfs: no entities/ directory found near {}",
-            level_path.display()
-        );
-        return Ok(GltfLibraryDto {
-            folder: String::new(),
-            files: Vec::new(),
-        });
-    };
-
-    eprintln!(
-        "list_entities_gltfs: scanning {}",
-        entities_root.display()
-    );
-
-    let mut files: Vec<GltfFileDto> = Vec::new();
-    let entries = std::fs::read_dir(&entities_root).map_err(|e| e.to_string())?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        let ftype = entry.file_type().map_err(|e| e.to_string())?;
-        if ftype.is_dir() {
-            let category = path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("other")
-                .to_string();
-            walk_gltf(&path, &category, &mut files).map_err(|e| e.to_string())?;
-        } else if ftype.is_file() {
-
-            let ext = path
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_lowercase());
-            if matches!(ext.as_deref(), Some("gltf") | Some("glb")) {
-                let name = path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                files.push(GltfFileDto {
-                    name,
-                    path: path.display().to_string(),
-                    extension: ext.unwrap_or_default(),
-                    size_bytes: size,
-                    category: "other".to_string(),
-                });
-            }
-        }
-    }
-
-    files.sort_by(|a, b| {
-        a.category
-            .to_lowercase()
-            .cmp(&b.category.to_lowercase())
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-
-    eprintln!(
-        "list_entities_gltfs: found {} files at {}",
-        files.len(),
-        entities_root.display()
-    );
-
-    Ok(GltfLibraryDto {
-        folder: entities_root.display().to_string(),
-        files,
-    })
-}
-
-
 #[tauri::command]
 
 fn read_file_bytes(path: String) -> Result<tauri::ipc::Response, String> {
@@ -1552,328 +1360,6 @@ fn read_file_bytes(path: String) -> Result<tauri::ipc::Response, String> {
 }
 
 
-#[derive(Serialize)]
-struct DecodedBoneDto {
-
-    rotations: Vec<f32>,
-
-    translations: Vec<f32>,
-    scales: Vec<f32>,
-    rotation_animated: bool,
-    translation_animated: bool,
-    scale_animated: bool,
-}
-
-
-#[derive(Serialize)]
-struct DecodedClipDto {
-    name: String,
-    num_frames: u16,
-    frame_rate: f32,
-    looping: bool,
-
-    bones: Vec<DecodedBoneDto>,
-}
-
-
-#[derive(Serialize)]
-struct GlbMaterialTexturesDto {
-
-    material_name: String,
-
-    albedo_path: Option<String>,
-
-    normal_path: Option<String>,
-
-    emissive_path: Option<String>,
-}
-
-
-#[tauri::command]
-fn find_glb_textures(
-    level_folder: String,
-    material_names: Vec<String>,
-) -> Result<Vec<GlbMaterialTexturesDto>, String> {
-    let textures_root = Path::new(&level_folder).join("textures");
-    if !textures_root.is_dir() {
-
-        eprintln!(
-            "find_glb_textures: no textures/ at {}",
-            textures_root.display()
-        );
-        return Ok(material_names
-            .into_iter()
-            .map(|n| GlbMaterialTexturesDto {
-                material_name: n,
-                albedo_path: None,
-                normal_path: None,
-                emissive_path: None,
-            })
-            .collect());
-    }
-
-
-    let mut by_stem: HashMap<String, std::path::PathBuf> = HashMap::new();
-    walk_dds_files(&textures_root, &mut by_stem).map_err(|e| e.to_string())?;
-
-    let mut out = Vec::with_capacity(material_names.len());
-    for name in material_names {
-
-        let base = name
-            .rsplit(|c: char| c == '/' || c == '\\')
-            .next()
-            .unwrap_or(&name)
-            .to_string();
-        let albedo_path = by_stem
-            .get(&format!("{}_c", base))
-            .map(|p| p.display().to_string());
-        let normal_path = by_stem
-            .get(&format!("{}_n", base))
-            .map(|p| p.display().to_string());
-        let emissive_path = by_stem
-            .get(&format!("{}_e", base))
-            .map(|p| p.display().to_string());
-        out.push(GlbMaterialTexturesDto {
-            material_name: name,
-            albedo_path,
-            normal_path,
-            emissive_path,
-        });
-    }
-
-    Ok(out)
-}
-
-
-fn walk_dds_files(
-    dir: &Path,
-    out: &mut HashMap<String, std::path::PathBuf>,
-) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let ftype = entry.file_type()?;
-        if ftype.is_dir() {
-            walk_dds_files(&path, out)?;
-        } else if ftype.is_file() {
-            let ext = path
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_lowercase());
-            if matches!(ext.as_deref(), Some("dds")) {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-
-                    out.insert(stem.to_string(), path.clone());
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-
-#[derive(Serialize)]
-struct AnimsetSummaryDto {
-
-    tuid_hex: String,
-
-    name: String,
-
-    num_frames: u16,
-    frame_rate: f32,
-
-    num_bones: u16,
-    looping: bool,
-}
-
-
-#[tauri::command]
-fn list_animset_clips(level_folder: String) -> Result<Vec<AnimsetSummaryDto>, String> {
-    match lunalib::detect_layout(Path::new(&level_folder)) {
-        Ok(lunalib::LevelLayout::Tod) | Ok(lunalib::LevelLayout::Rfom) => {
-            return Ok(Vec::new());
-        }
-        _ => {}
-    }
-    let mut lookup = open_lookup(&level_folder)?;
-    let ptrs = lookup
-        .pointers(AssetKind::Animset)
-        .map_err(|e| format!("read animset table: {e}"))?;
-
-    let path = Path::new(&level_folder).join("animsets.dat");
-    let mut file = match File::open(&path) {
-        Ok(f) => f,
-        Err(e) => {
-
-            eprintln!("list_animset_clips: no animsets.dat at {} ({e})", path.display());
-            return Ok(Vec::new());
-        }
-    };
-
-    let mut out: Vec<AnimsetSummaryDto> = Vec::new();
-    use std::io::{Read, Seek, SeekFrom};
-    for ptr in ptrs {
-        if let Err(e) = file.seek(SeekFrom::Start(u64::from(ptr.offset))) {
-            eprintln!("list_animset_clips: seek failed for 0x{:016X}: {e}", ptr.tuid);
-            continue;
-        }
-        let mut buf = vec![0u8; ptr.length as usize];
-        if let Err(e) = file.read_exact(&mut buf) {
-            eprintln!("list_animset_clips: read failed for 0x{:016X}: {e}", ptr.tuid);
-            continue;
-        }
-        let mut ig = match IgFile::open(std::io::Cursor::new(buf)) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-        let h = match read_animation_header(&mut ig) {
-            Ok(Some(h)) => h,
-            _ => continue,
-        };
-        out.push(AnimsetSummaryDto {
-            tuid_hex: format!("0x{:016X}", ptr.tuid),
-            name: h.name.clone(),
-            num_frames: h.num_frames,
-            frame_rate: h.frame_rate,
-            num_bones: h.num_bones,
-            looping: h.is_looping(),
-        });
-    }
-
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    Ok(out)
-}
-
-
-#[tauri::command]
-fn fetch_animset_clip(
-    level_folder: String,
-    animset_hash_hex: String,
-    position_scale: f32,
-    scale_scale: f32,
-) -> Result<DecodedClipDto, String> {
-    let target = parse_hex_u64(&animset_hash_hex)?;
-
-
-    let mut lookup = open_lookup(&level_folder)?;
-    let ptrs = lookup
-        .pointers(AssetKind::Animset)
-        .map_err(|e| format!("read animset table: {e}"))?;
-    let ptr = ptrs
-        .iter()
-        .find(|p| p.tuid == target)
-        .ok_or_else(|| format!("animset 0x{:016X} not in 0x1D700 table", target))?;
-
-
-    let path = Path::new(&level_folder).join("animsets.dat");
-    let mut file =
-        File::open(&path).map_err(|e| format!("open {}: {e}", path.display()))?;
-    use std::io::{Read, Seek, SeekFrom};
-    file.seek(SeekFrom::Start(u64::from(ptr.offset)))
-        .map_err(|e| format!("seek animsets.dat: {e}"))?;
-    let mut buf = vec![0u8; ptr.length as usize];
-    file.read_exact(&mut buf)
-        .map_err(|e| format!("read animsets.dat: {e}"))?;
-
-
-    let mut ig = IgFile::open(std::io::Cursor::new(buf))
-        .map_err(|e| format!("animset IGHW: {e}"))?;
-    let header = read_animation_header(&mut ig)
-        .map_err(|e| format!("animation header: {e}"))?
-        .ok_or_else(|| {
-            "animset chunk has no 0xF000 Animation section".to_string()
-        })?;
-    let ctrl = read_animation_control(&mut ig, &header)
-        .map_err(|e| format!("animation control: {e}"))?;
-    let clip = decode_animation(&mut ig, &header, &ctrl, position_scale, scale_scale)
-        .map_err(|e| format!("animation decode: {e}"))?;
-
-
-    Ok(DecodedClipDto {
-        name: clip.name,
-        num_frames: clip.num_frames,
-        frame_rate: clip.frame_rate,
-        looping: clip.looping,
-        bones: clip
-            .bones
-            .into_iter()
-            .map(|b| DecodedBoneDto {
-                rotations: b.rotations,
-                translations: b.translations,
-                scales: b.scales,
-                rotation_animated: b.rotation_animated,
-                translation_animated: b.translation_animated,
-                scale_animated: b.scale_animated,
-            })
-            .collect(),
-    })
-}
-
-
-fn parse_hex_u64(s: &str) -> Result<u64, String> {
-    let trimmed = s.trim().trim_start_matches("0x").trim_start_matches("0X");
-    u64::from_str_radix(trimmed, 16).map_err(|e| format!("invalid hex u64 {s:?}: {e}"))
-}
-
-
-#[tauri::command]
-fn list_gltfs_in_folder(path: String) -> Result<GltfLibraryDto, String> {
-    let root = Path::new(&path);
-    if !root.is_dir() {
-        return Err(format!("not a directory: {path}"));
-    }
-
-    let mut files: Vec<GltfFileDto> = Vec::new();
-    let entries = std::fs::read_dir(root).map_err(|e| e.to_string())?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let entry_path = entry.path();
-        let ftype = entry.file_type().map_err(|e| e.to_string())?;
-        if ftype.is_dir() {
-            let category = entry_path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("other")
-                .to_string();
-            walk_gltf(&entry_path, &category, &mut files).map_err(|e| e.to_string())?;
-        } else if ftype.is_file() {
-            let ext = entry_path
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_lowercase());
-            if matches!(ext.as_deref(), Some("gltf") | Some("glb")) {
-                let name = entry_path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                files.push(GltfFileDto {
-                    name,
-                    path: entry_path.display().to_string(),
-                    extension: ext.unwrap_or_default(),
-                    size_bytes: size,
-                    category: "other".to_string(),
-                });
-            }
-        }
-    }
-    files.sort_by(|a, b| {
-        a.category
-            .to_lowercase()
-            .cmp(&b.category.to_lowercase())
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-    eprintln!(
-        "list_gltfs_in_folder: found {} files at {}",
-        files.len(),
-        path
-    );
-    Ok(GltfLibraryDto {
-        folder: path,
-        files,
-    })
-}
 
 
 
@@ -2130,13 +1616,13 @@ fn main() {
             level_layout,
             level_meshes_stream,
             level_character_library_stream,
-            list_character_gltfs,
-            list_entities_gltfs,
-            list_gltfs_in_folder,
+            gltf_cmds::list_character_gltfs,
+            gltf_cmds::list_entities_gltfs,
+            gltf_cmds::list_gltfs_in_folder,
             read_file_bytes,
-            fetch_animset_clip,
-            list_animset_clips,
-            find_glb_textures,
+            animset_cmds::fetch_animset_clip,
+            animset_cmds::list_animset_clips,
+            gltf_cmds::find_glb_textures,
             sound_cmds::list_level_sounds,
             sound_cmds::dump_sound_bank,
             sound_cmds::extract_level_sounds,
