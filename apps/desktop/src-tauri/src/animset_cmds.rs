@@ -216,16 +216,9 @@ pub fn decode_animset_clip(
 
     let trans_shift = skeleton.translation_shift;
     let scale_shift_v = skeleton.scale_shift;
-    let pos_scale = if (trans_shift as u32) < 15 {
-        1.0 / (0x8000u32 >> trans_shift) as f32
-    } else {
-        1.0 / 32768.0
-    };
-    let scale_scale = if (scale_shift_v as u32) < 15 {
-        1.0 / (0x8000u32 >> scale_shift_v) as f32
-    } else {
-        1.0 / 32768.0
-    };
+    let mconv = profile.matrix_convention();
+    let pos_scale = mconv.shift_scale(trans_shift);
+    let scale_scale = mconv.shift_scale(scale_shift_v);
 
     let lookup_path = level_path.join("assetlookup.dat");
     let lookup_file =

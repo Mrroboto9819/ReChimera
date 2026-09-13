@@ -2406,16 +2406,9 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
             .as_ref()
             .map(|s| s.scale_shift)
             .unwrap_or(0);
-        let pos_scale = if (trans_shift as u32) < 15 {
-            1.0 / (0x8000u32 >> trans_shift) as f32
-        } else {
-            1.0 / 32768.0
-        };
-        let scale_scale = if (scale_shift_v as u32) < 15 {
-            1.0 / (0x8000u32 >> scale_shift_v) as f32
-        } else {
-            1.0 / 32768.0
-        };
+        let mconv = profile.matrix_convention();
+        let pos_scale = mconv.shift_scale(trans_shift);
+        let scale_scale = mconv.shift_scale(scale_shift_v);
 
         // Per-moby shader / texture diagnostic (self-gated on
         // RECHIMERA_DEBUG_MOBY match — silent for unfiltered runs).

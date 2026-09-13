@@ -238,18 +238,10 @@ pub fn export_moby_glb_with_options(
             .as_ref()
             .map(|s| s.scale_shift)
             .unwrap_or(0);
-        let pos_scale = if (trans_shift as u32) < 15 {
-            1.0 / (0x8000u32 >> trans_shift) as f32
-        } else {
-            1.0 / 32768.0
-        };
-        let scale_scale = if (scale_shift_v as u32) < 15 {
-            1.0 / (0x8000u32 >> scale_shift_v) as f32
-        } else {
-            1.0 / 32768.0
-        };
-
         let profile = resolve_profile_for_folder(&level_folder, None);
+        let mconv = profile.matrix_convention();
+        let pos_scale = mconv.shift_scale(trans_shift);
+        let scale_scale = mconv.shift_scale(scale_shift_v);
 
         if matches!(layout, LevelLayout::Rfom | LevelLayout::Tod)
             && !asset.rfom_anim_offsets.is_empty()
@@ -322,16 +314,9 @@ pub fn export_moby_glb_with_options(
                     .as_ref()
                     .map(|s| s.scale_shift)
                     .unwrap_or(0);
-                let pos_scale = if (trans_shift as u32) < 15 {
-                    1.0 / (0x8000u32 >> trans_shift) as f32
-                } else {
-                    1.0 / 32768.0
-                };
-                let scale_scale = if (scale_shift_v as u32) < 15 {
-                    1.0 / (0x8000u32 >> scale_shift_v) as f32
-                } else {
-                    1.0 / 32768.0
-                };
+                let mconv = profile.matrix_convention();
+                let pos_scale = mconv.shift_scale(trans_shift);
+                let scale_scale = mconv.shift_scale(scale_shift_v);
                 let sb = asset
                     .skeleton
                     .as_ref()
@@ -648,16 +633,9 @@ fn try_load_skinned_moby_for_level(
         let s = asset.skeleton.as_ref()?;
         (s.translation_shift, s.scale_shift)
     };
-    let pos_scale = if (trans_shift as u32) < 15 {
-        1.0 / (0x8000u32 >> trans_shift) as f32
-    } else {
-        1.0 / 32768.0
-    };
-    let scale_scale = if (scale_shift_v as u32) < 15 {
-        1.0 / (0x8000u32 >> scale_shift_v) as f32
-    } else {
-        1.0 / 32768.0
-    };
+    let mconv = profile.matrix_convention();
+    let pos_scale = mconv.shift_scale(trans_shift);
+    let scale_scale = mconv.shift_scale(scale_shift_v);
 
     let mut clips: Vec<DecodedClip> = Vec::new();
 

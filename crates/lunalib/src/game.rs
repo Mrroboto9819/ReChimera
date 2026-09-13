@@ -111,6 +111,12 @@ impl AnimProfile {
         }
         self.apply_blend_mask_rotation_gate
     }
+
+    pub fn matrix_convention(&self) -> MatrixConvention {
+        self.game
+            .map(Game::matrix_convention)
+            .unwrap_or(MatrixConvention::DEFAULT)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -126,6 +132,18 @@ impl MatrixConvention {
         propagate_scale_frames: false,
         yard_to_meter: 0.9144,
     };
+
+    pub fn shift_scale(&self, shift: u16) -> f32 {
+        let mut s = shift;
+        if self.recover_skeleton_shift_bytes && s > 15 {
+            s = s.swap_bytes();
+        }
+        if (s as u32) < 15 {
+            1.0 / (0x8000u32 >> s) as f32
+        } else {
+            1.0 / 32768.0
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
