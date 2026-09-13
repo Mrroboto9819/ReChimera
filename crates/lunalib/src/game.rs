@@ -164,3 +164,50 @@ impl GameProfile {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shift_scale_matches_legacy_formula() {
+        let m = MatrixConvention::DEFAULT;
+        assert_eq!(m.shift_scale(0), 1.0 / 32768.0);
+        assert_eq!(m.shift_scale(5), 1.0 / 1024.0);
+        assert_eq!(m.shift_scale(14), 0.5);
+        assert_eq!(m.shift_scale(15), 1.0 / 32768.0);
+        assert_eq!(m.shift_scale(768), 1.0 / 32768.0);
+    }
+
+    #[test]
+    fn shift_scale_recovery_unswaps_bytes() {
+        let m = MatrixConvention {
+            recover_skeleton_shift_bytes: true,
+            ..MatrixConvention::DEFAULT
+        };
+        assert_eq!(m.shift_scale(0x0300), 1.0 / 4096.0);
+        assert_eq!(m.shift_scale(5), 1.0 / 1024.0);
+    }
+
+    #[test]
+    fn game_layout_mapping_keeps_v2_games_distinct() {
+        use crate::level_layout::LevelLayout;
+        assert_eq!(Game::R2.layout(), LevelLayout::V2);
+        assert_eq!(Game::R3.layout(), LevelLayout::V2);
+        assert_eq!(Game::FFA.layout(), LevelLayout::V2);
+        assert_eq!(Game::Tod.layout(), LevelLayout::Tod);
+        assert_eq!(Game::Rfom.layout(), LevelLayout::Rfom);
+        assert_ne!(
+            Game::R2.anim_profile().apply_blend_mask_rotation_gate,
+            Game::R3.anim_profile().apply_blend_mask_rotation_gate
+        );
+    }
+
+    #[test]
+    fn legacy_profile_falls_back_to_default_convention() {
+        let m = AnimProfile::LEGACY.matrix_convention();
+        assert!(!m.recover_skeleton_shift_bytes);
+        assert!(!m.propagate_scale_frames);
+        assert_eq!(m.yard_to_meter, 0.9144);
+    }
+}

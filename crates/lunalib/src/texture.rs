@@ -931,3 +931,24 @@ pub fn bulk_extract_pngs(
     log_unknown_format_summary();
     Ok(pngs)
 }
+
+#[cfg(test)]
+mod tex_format_tests {
+    use super::*;
+
+    #[test]
+    fn dual_range_maps_stay_in_sync() {
+        assert_eq!(TexFormat::from_byte(0x06), TexFormat::Dxt1);
+        assert_eq!(TexFormat::from_byte(0x86), TexFormat::Dxt1);
+        assert_eq!(TexFormat::from_byte(0x03), TexFormat::R5G6B5);
+        assert_eq!(TexFormat::from_byte(0x84), TexFormat::R5G6B5);
+        assert_eq!(TexFormat::from_byte(0x05), TexFormat::A8R8G8B8);
+        assert_eq!(TexFormat::from_byte(0x85), TexFormat::A8R8G8B8);
+        assert_eq!(TexFormat::from_byte(0x0B), TexFormat::Bc1Linear);
+    }
+
+    #[test]
+    fn r3_0x9a_stays_unknown_until_reverse_engineered() {
+        assert_eq!(TexFormat::from_byte(0x9A), TexFormat::Unknown(0x9A));
+    }
+}

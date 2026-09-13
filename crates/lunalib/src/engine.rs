@@ -97,3 +97,24 @@ impl GameEngine {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn engine_dispatch_follows_game_layout() {
+        assert_eq!(engine_for(Game::R2).layout(), LevelLayout::V2);
+        assert_eq!(engine_for(Game::R3).layout(), LevelLayout::V2);
+        assert_eq!(engine_for(Game::Tod).layout(), LevelLayout::Tod);
+        assert_eq!(engine_for(Game::Rfom).layout(), LevelLayout::Rfom);
+        assert_eq!(engine_for(Game::R3).game(), Some(Game::R3));
+    }
+
+    #[test]
+    fn layout_engine_has_no_game_identity() {
+        let e = engine_for_layout(LevelLayout::V2);
+        assert_eq!(e.layout(), LevelLayout::V2);
+        assert_eq!(e.game(), None);
+    }
+}
