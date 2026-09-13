@@ -3418,34 +3418,16 @@ fn try_load_skinned_moby_for_level(
     profile: AnimProfile,
 ) -> Option<(lunalib::MobyAsset, Vec<DecodedClip>)> {
     let mut asset: Option<lunalib::MobyAsset> = None;
-    match layout {
-        LevelLayout::V2 => {
-            let _ = lunalib::read_moby_assets_with_total(
-                level_path,
-                Some(&[tuid]),
-                |_| {},
-                |a| {
-                    if a.tuid == tuid {
-                        asset = Some(a);
-                    }
-                },
-            );
-        }
-        LevelLayout::Tod => {
-            let _ = lunalib::read_moby_assets_old(level_path, |a| {
-                if a.tuid == tuid {
-                    asset = Some(a);
-                }
-            });
-        }
-        LevelLayout::Rfom => {
-            let _ = lunalib::read_moby_assets_rfom(level_path, |a| {
-                if a.tuid == tuid {
-                    asset = Some(a);
-                }
-            });
-        }
-    }
+    let _ = lunalib::engine_for_layout(layout).read_mobys(
+        level_path,
+        Some(&[tuid]),
+        &mut |_: usize| {},
+        &mut |a: lunalib::MobyAsset| {
+            if a.tuid == tuid {
+                asset = Some(a);
+            }
+        },
+    );
     let asset = asset?;
     if asset.skeleton.is_none() {
         return None;
