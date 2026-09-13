@@ -2,6 +2,8 @@
 
 mod cache;
 mod dto;
+mod assetlookup_cmds;
+mod psarc_cmds;
 mod r2;
 mod sound_cmds;
 
@@ -1312,276 +1314,10 @@ fn run_library_stream(
 
 
 
-#[derive(Serialize)]
-struct PsarcEntryDto {
-    name: String,
-    uncompressed_size: u64,
-    file_offset: u64,
-}
-
-#[derive(Serialize)]
-struct PsarcListDto {
-    major: u16,
-    minor: u16,
-    compression: &'static str,
-    block_size: u32,
-    entry_count: usize,
-    entries: Vec<PsarcEntryDto>,
-}
-
-#[tauri::command]
-fn psarc_list(path: String) -> Result<PsarcListDto, String> {
-    let archive = psarc::Archive::open(Path::new(&path)).map_err(|e| e.to_string())?;
-    let compression = match archive.header.compression {
-        psarc::Compression::Zlib => "zlib",
-        psarc::Compression::Lzma => "lzma",
-        psarc::Compression::Oodle => "oodle",
-    };
-    let entries = archive
-        .entries
-        .iter()
-        .map(|e| PsarcEntryDto {
-            name: e.name.clone(),
-            uncompressed_size: e.uncompressed_size,
-            file_offset: e.file_offset,
-        })
-        .collect();
-    Ok(PsarcListDto {
-        major: archive.header.major,
-        minor: archive.header.minor,
-        compression,
-        block_size: archive.header.block_size,
-        entry_count: archive.entries.len(),
-        entries,
-    })
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum PsarcEvent {
-
-    Total { total: usize },
-
-    File {
-        index: usize,
-        name: String,
-        bytes: u64,
-    },
-    Done,
-    Error { message: String },
-}
-
-#[tauri::command]
-fn psarc_extract_stream(
-    input: String,
-    output: String,
-    on_event: Channel<PsarcEvent>,
-) -> Result<(), String> {
-    if let Err(message) = run_psarc_extract(&input, &output, &on_event) {
-        let _ = on_event.send(PsarcEvent::Error { message: message.clone() });
-        return Err(message);
-    }
-    let _ = on_event.send(PsarcEvent::Done);
-    Ok(())
-}
-
-fn run_psarc_extract(
-    input: &str,
-    output: &str,
-    on_event: &Channel<PsarcEvent>,
-) -> Result<(), String> {
-    let mut archive = psarc::Archive::open(Path::new(input)).map_err(|e| e.to_string())?;
-    let out_root = Path::new(output);
-    std::fs::create_dir_all(out_root).map_err(|e| format!("create out dir: {e}"))?;
-
-    let total = archive.entries.len();
-    let _ = on_event.send(PsarcEvent::Total { total });
 
 
-    let entries: Vec<_> = archive.entries.clone();
 
-    for (i, entry) in entries.iter().enumerate() {
-        let bytes = archive.read_entry(entry).map_err(|e| e.to_string())?;
-
-
-        let mut rel = entry.name.replace('\\', "/");
-        while rel.starts_with('/') {
-            rel.remove(0);
-        }
-        if rel.split('/').any(|seg| seg == "..") {
-            return Err(format!(
-                "path traversal attempt blocked for entry: {}",
-                entry.name
-            ));
-        }
-
-
-        let dest = out_root.join(&rel);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("mkdir {parent:?}: {e}"))?;
-        }
-
-
-        write_bytes_to_path(&dest, &bytes)
-            .map_err(|e| format!("write {dest:?}: {e}"))?;
-
-        let _ = on_event.send(PsarcEvent::File {
-            index: i + 1,
-            name: entry.name.clone(),
-            bytes: bytes.len() as u64,
-        });
-    }
-    Ok(())
-}
-
-
-#[derive(Serialize)]
-struct AssetLookupKindDto {
-    name: String,
-    section_id: u32,
-    count: usize,
-    has_decoder: bool,
-}
-
-#[derive(Serialize)]
-struct AssetLookupOverviewDto {
-    layout: String,
-    version_major: u16,
-    version_minor: u16,
-    kinds: Vec<AssetLookupKindDto>,
-}
-
-#[tauri::command]
-fn asset_lookup_inspect(path: String) -> Result<AssetLookupOverviewDto, String> {
-    let overview = lunalib::inspect_assetlookup(Path::new(&path)).map_err(|e| e.to_string())?;
-    Ok(AssetLookupOverviewDto {
-        layout: overview.layout.to_string(),
-        version_major: overview.version_major,
-        version_minor: overview.version_minor,
-        kinds: overview
-            .kinds
-            .into_iter()
-            .map(|k| AssetLookupKindDto {
-                name: k.name.to_string(),
-                section_id: k.section_id,
-                count: k.count,
-                has_decoder: k.has_decoder,
-            })
-            .collect(),
-    })
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum AssetLookupExtractEvent {
-    Total { kind: String, count: usize },
-    Entry {
-        kind: String,
-        index: usize,
-        tuid: String,
-        ok: bool,
-        message: Option<String>,
-    },
-    KindDone { kind: String },
-    Done,
-    Error { message: String },
-}
-
-#[tauri::command]
-fn asset_lookup_extract_stream(
-    input: String,
-    output: String,
-    kinds: Vec<String>,
-    max_texture_dim: Option<u32>,
-    on_event: Channel<AssetLookupExtractEvent>,
-) -> Result<(), String> {
-    if let Err(message) =
-        run_asset_lookup_extract(&input, &output, &kinds, max_texture_dim, &on_event)
-    {
-        let _ = on_event.send(AssetLookupExtractEvent::Error {
-            message: message.clone(),
-        });
-        return Err(message);
-    }
-    let _ = on_event.send(AssetLookupExtractEvent::Done);
-    Ok(())
-}
-
-fn run_asset_lookup_extract(
-    input: &str,
-    output: &str,
-    kind_names: &[String],
-    max_texture_dim: Option<u32>,
-    on_event: &Channel<AssetLookupExtractEvent>,
-) -> Result<(), String> {
-    let input_path = Path::new(input);
-    let output_path = Path::new(output);
-
-    let kinds = parse_asset_kinds(kind_names)?;
-    if kinds.is_empty() {
-        return Err("no asset kinds selected".to_string());
-    }
-
-    std::fs::create_dir_all(output_path).map_err(|e| format!("create out dir: {e}"))?;
-
-    let options = lunalib::ExtractOptions {
-        kinds,
-        max_texture_dim: max_texture_dim.unwrap_or(4096),
-    };
-
-    let on_event_cl = on_event.clone();
-    lunalib::extract_assetlookup(input_path, output_path, &options, move |ev| match ev {
-        lunalib::ExtractEvent::Total { kind, count } => {
-            let _ = on_event_cl.send(AssetLookupExtractEvent::Total {
-                kind: kind.name().to_string(),
-                count,
-            });
-        }
-        lunalib::ExtractEvent::Entry { kind, index, tuid, ok, message } => {
-            let _ = on_event_cl.send(AssetLookupExtractEvent::Entry {
-                kind: kind.name().to_string(),
-                index,
-                tuid: format!("0x{:016X}", tuid),
-                ok,
-                message,
-            });
-        }
-        lunalib::ExtractEvent::KindDone { kind } => {
-            let _ = on_event_cl.send(AssetLookupExtractEvent::KindDone {
-                kind: kind.name().to_string(),
-            });
-        }
-    })
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-fn parse_asset_kinds(names: &[String]) -> Result<Vec<lunalib::AssetKind>, String> {
-    let mut out = Vec::with_capacity(names.len());
-    for name in names {
-        let kind = match name.as_str() {
-            "shader" => lunalib::AssetKind::Shader,
-            "texture" => lunalib::AssetKind::Texture,
-            "highmip" => lunalib::AssetKind::HighMip,
-            "cubemap" => lunalib::AssetKind::Cubemap,
-            "tie" => lunalib::AssetKind::Tie,
-            "foliage" => lunalib::AssetKind::Foliage,
-            "shrub" => lunalib::AssetKind::Shrub,
-            "moby" => lunalib::AssetKind::Moby,
-            "animset" => lunalib::AssetKind::Animset,
-            "cinematic" => lunalib::AssetKind::Cinematic,
-            "zone" => lunalib::AssetKind::Zone,
-            "lighting" => lunalib::AssetKind::Lighting,
-            other => return Err(format!("unknown asset kind: {other}")),
-        };
-        out.push(kind);
-    }
-    Ok(out)
-}
-
-fn write_bytes_to_path(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_bytes_to_path(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         let s = path.to_string_lossy();
@@ -2412,10 +2148,10 @@ fn main() {
             get_level_texture_png,
             get_level_textures_bulk,
             list_level_files,
-            psarc_list,
-            psarc_extract_stream,
-            asset_lookup_inspect,
-            asset_lookup_extract_stream,
+            psarc_cmds::psarc_list,
+            psarc_cmds::psarc_extract_stream,
+            assetlookup_cmds::asset_lookup_inspect,
+            assetlookup_cmds::asset_lookup_extract_stream,
             write_bytes,
             r2::r2_setup_check,
             r2::r2_list_maps,
