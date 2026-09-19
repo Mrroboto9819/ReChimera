@@ -2718,7 +2718,9 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
             let _ = on_event.send(CacheEvent::Progress { current: glb_done });
             continue;
         }
-        let patched_shaders = if profile.game == Some(lunalib::Game::R3) {
+        let patched_shaders = if profile.game == Some(lunalib::Game::R3)
+            && std::env::var("RECHIMERA_TEX_SUBSTITUTE").is_ok()
+        {
             substitute_absent_albedos(&shaders, &asset, &texture_pngs)
         } else {
             None
