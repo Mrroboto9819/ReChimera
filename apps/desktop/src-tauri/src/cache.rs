@@ -788,12 +788,10 @@ fn compose_additive_overlays(clips: &mut Vec<DecodedClip>, _debug: bool, r3: boo
     if pairs.is_empty() {
         return;
     }
-    eprintln!(
-        "[anim-compose] scanning {} clips, {} overlay candidates (force_all={})",
-        clips.len(),
-        pairs.len(),
-        force_all
-    );
+    let verbose = std::env::var("RECHIMERA_LOG_ANIM_DETAIL").is_ok();
+    let total = pairs.len();
+    let mut composed = 0usize;
+    let mut skipped = 0usize;
     for (fire_idx, base_idx_opt, base_name, src) in pairs {
         let fire_name = clips[fire_idx].name.clone();
         let fire_nf = clips[fire_idx].num_frames;
@@ -807,18 +805,32 @@ fn compose_additive_overlays(clips: &mut Vec<DecodedClip>, _debug: bool, r3: boo
                     dump_fire_vs_idle_rotations(&clips[fire_idx], &base);
                 }
                 let (rc, tc, sc) = clips[fire_idx].compose_with_base(&base, true);
-                eprintln!(
-                    "[anim-compose]  '{fire_name}' (nf={fire_nf}) <- '{base_name}' (nf={base_nf}) [{src}] — \
-                     copied rot={rc} tra={tc} scl={sc} bones"
-                );
+                composed += 1;
+                if verbose {
+                    eprintln!(
+                        "[anim-compose]  '{fire_name}' (nf={fire_nf}) <- '{base_name}' (nf={base_nf}) [{src}] — \
+                         copied rot={rc} tra={tc} scl={sc} bones"
+                    );
+                }
             }
             None => {
-                eprintln!(
-                    "[anim-compose]  '{fire_name}' (nf={fire_nf}) — NO base '{base_name}' or 'mp_stand_dle' in animset"
-                );
+                skipped += 1;
+                if verbose {
+                    eprintln!(
+                        "[anim-compose]  '{fire_name}' (nf={fire_nf}) — NO base '{base_name}' or 'mp_stand_dle' in animset"
+                    );
+                }
             }
         }
     }
+    eprintln!(
+        "[anim-compose] {} clips: composed {} of {} overlay candidates ({} without base, force_all={})",
+        clips.len(),
+        composed,
+        total,
+        skipped,
+        force_all
+    );
 }
 
 /// Diagnostic — dump per-frame decoded rotation for the first 6 ANIMATED bones
