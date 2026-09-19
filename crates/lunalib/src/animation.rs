@@ -642,7 +642,7 @@ impl DecodedClip {
     }
 }
 
-fn extract_bind_rotation(m: &[f32; 16]) -> [f32; 4] {
+pub fn extract_bind_rotation(m: &[f32; 16]) -> [f32; 4] {
     // Column-major 4x4. Top-left 3x3 holds rotation (possibly with scale).
     // Normalize columns to remove scale, then convert to quaternion.
     let cx = [m[0], m[1], m[2]];
@@ -854,7 +854,7 @@ fn propagate_scale_frames(clip: &mut DecodedClip, skel: &Skeleton) {
     }
 }
 
-fn dequantize_quaternion(qi: [i16; 4]) -> [f32; 4] {
+pub fn dequantize_quaternion(qi: [i16; 4]) -> [f32; 4] {
     const INV: f32 = 1.0 / 32767.0;
     let mut q = [
         qi[0] as f32 * INV,
@@ -1242,20 +1242,18 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 .unwrap_or([0.0, 0.0, 0.0, 1.0]);
             bind_q.to_vec()
         } else if let Some(bl) = skel
-            .filter(|_| bind_fallback)
+            .filter(|_| bind_fallback && additive)
             .and_then(|s| s.bind_local.get(b).copied())
         {
-            // Untracked bones must rest at the SKELETON BIND, not the clip's
-            // ref pose. Shared animsets (R3 gameheads: one animset serves
-            // susan/female/male/capelli/child heads) carry ref rotations that
-            // diverge up to 180° from an individual head's bind on the
-            // teeth/tongue bones — the "teeth stick out of the face on any
-            // animation" bug. IT emits NO channel for untracked bones (node
-            // keeps bind rest); we emit an explicit bind channel so switching
-            // clips in the viewer still resets every bone. Position/scale
-            // fallbacks below already behave this way (bind or no channel).
-            // R3-only via profile; R2/RFOM keep the ref-pose fallback they
-            // were rendering correctly with.
+            // ADDITIVE clips only (R3, via profile): their ref_pose_rotations
+            // are delta-space values, not absolute poses — emitting them as
+            // absolute rotations collapses the mesh (viseme heads,
+            // 2026-09-19). Untracked bones rest at SKELETON BIND instead.
+            // NON-additive clips fall through to the clip ref pose below: it
+            // is the authored base pose (weapon-hold arms on partial mp_*
+            // body clips) and measures within 0.1° of bind on head animsets,
+            // so teeth stay put. R2/RFOM/TOD have the profile flag off and
+            // always use the ref pose, as they always did.
             extract_bind_rotation(&bl).to_vec()
         } else {
             let q = dequantize_quaternion(

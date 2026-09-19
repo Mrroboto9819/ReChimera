@@ -99,10 +99,14 @@ pub struct AnimProfile {
     /// (logical frame -> stored frame). R2/RFOM/TOD clips do not use it and
     /// were rendering correctly without it, so it stays off for them.
     pub apply_frame_remap: bool,
-    /// R3-only: rest untracked-rotation bones at the SKELETON BIND instead of
-    /// the clip's ref pose. Needed because R3 gameheads share one animset whose
-    /// ref pose is up to 180° off each head's bind on teeth bones. R2 faces
-    /// were working with the ref-pose fallback, so it stays off for them.
+    /// R3-only, and applied ONLY to ADDITIVE clips (see animation.rs): an
+    /// additive clip's ref_pose_rotations live in delta space, so emitting
+    /// them as absolute rotations collapses the mesh (viseme heads,
+    /// 2026-09-19). Untracked bones in additive clips rest at SKELETON BIND.
+    /// Non-additive clips keep the clip ref pose for untracked bones — it is
+    /// the authored base (weapon-hold arms on partial mp_* body clips,
+    /// shoulders ~55° off bind) and sits within 0.1° of bind on head
+    /// animsets, so teeth stay correct.
     pub untracked_rotation_bind_fallback: bool,
     /// R3-only: animset clips author positions against a shared ref pose
     /// that does not match the target skeleton (gamehead animsets serve many

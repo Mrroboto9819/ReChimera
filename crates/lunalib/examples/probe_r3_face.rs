@@ -323,6 +323,53 @@ fn main() -> ExitCode {
             continue;
         };
 
+        let tracked_rot: Vec<u16> = raw_t16_masks
+            .iter()
+            .chain(raw_t8_masks.iter())
+            .filter(|&&r| (r >> 4) & 0b11 == 0)
+            .map(|&r| (r >> 6) & 0x3FF)
+            .collect();
+        println!(
+            "blend_masks ({}): {:?}",
+            ctrl.blend_masks.len(),
+            ctrl.blend_masks
+        );
+        println!("rot-tracked bones: {:?}", {
+            let mut v = tracked_rot.clone();
+            v.sort_unstable();
+            v.dedup();
+            v
+        });
+
+        let tracked_set: std::collections::HashSet<u16> = tracked_rot.iter().copied().collect();
+        println!("--- per-bone ref rotation vs bind (untracked only) ---");
+        for b in 0..(h.num_bones as usize).min(skel.bones.len()) {
+            if tracked_set.contains(&(b as u16)) {
+                continue;
+            }
+            let raw = ctrl.ref_pose_rotations.get(b).copied().unwrap_or([0, 0, 0, 32767]);
+            let norm = ((raw[0] as f64).powi(2)
+                + (raw[1] as f64).powi(2)
+                + (raw[2] as f64).powi(2)
+                + (raw[3] as f64).powi(2))
+            .sqrt();
+            let rq = lunalib::dequantize_quaternion(raw);
+            let bl = skel.bind_local.get(b).copied().unwrap_or([0.0; 16]);
+            let bq = lunalib::extract_bind_rotation(&bl);
+            let dot = (rq[0] * bq[0] + rq[1] * bq[1] + rq[2] * bq[2] + rq[3] * bq[3])
+                .abs()
+                .min(1.0);
+            let angle_deg = 2.0 * dot.acos().to_degrees();
+            println!(
+                "  bone[{:3}] mask={:3} raw={:?} |raw|={:.0} angle_to_bind={:6.1}",
+                b,
+                ctrl.blend_masks.get(b).copied().unwrap_or(255),
+                raw,
+                norm,
+                angle_deg
+            );
+        }
+
         let mut ref_scale_entries: Vec<(usize, u16, i16)> = Vec::new();
         for (i, &raw) in raw_ref_masks.iter().enumerate() {
             if (raw >> 4) & 0b11 == 1 {

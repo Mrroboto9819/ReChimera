@@ -58,7 +58,8 @@ pub mod zone_old;
 
 pub use animation::{
     animation_section_offsets, decode_animation, decode_animation_with_skel,
-    decode_animation_with_skel_bones, decode_animation_with_skeleton, read_animation_control,
+    decode_animation_with_skel_bones, decode_animation_with_skeleton, dequantize_quaternion,
+    extract_bind_rotation, read_animation_control,
     read_animation_frame,
     read_animation_header, read_animation_header_at, AnimationControl, AnimationHeader,
     DecodedBone, DecodedClip, TrackKind, TrackMask,
