@@ -2845,6 +2845,53 @@ pub fn reextract_level_cache(
     extract_level_to_cache(folder, resolved_game_id, on_event)
 }
 
+#[derive(Serialize)]
+pub struct ClearedCache {
+    pub existed: bool,
+    pub freed_bytes: u64,
+}
+
+pub(crate) fn dir_size_bytes(path: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+    let mut total = 0u64;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            total += dir_size_bytes(&p);
+        } else if let Ok(meta) = entry.metadata() {
+            total += meta.len();
+        }
+    }
+    total
+}
+
+#[tauri::command]
+pub fn clear_level_cache(folder: String) -> Result<ClearedCache, String> {
+    if folder.trim().is_empty() {
+        return Err("empty level folder".to_string());
+    }
+    let root = cache_root(&folder);
+    if root.file_name().map(|n| n != CACHE_DIR_NAME).unwrap_or(true) {
+        return Err(format!("refusing to delete {root:?}"));
+    }
+    if !root.exists() {
+        return Ok(ClearedCache {
+            existed: false,
+            freed_bytes: 0,
+        });
+    }
+    let freed_bytes = dir_size_bytes(&root);
+    fs::remove_dir_all(&root).map_err(|e| {
+        format!("delete {root:?}: {e} — close any program using the cache folder and retry")
+    })?;
+    Ok(ClearedCache {
+        existed: true,
+        freed_bytes,
+    })
+}
+
 fn sanitized_cache_path(folder: &str, file: &str) -> Result<PathBuf, String> {
     if file.split(['/', '\\']).any(|seg| seg == ".." || seg.is_empty()) {
         return Err(format!("rejected path: {file}"));

@@ -86,6 +86,7 @@ pub struct UFrag {
     pub vertex_count: u16,
     pub index_count: u16,
     pub shader_index: u16,
+    pub vertex_offset: u32,
 
     pub positions: Vec<f32>,
     pub uvs: Vec<f32>,
@@ -143,7 +144,7 @@ where
 }
 
 fn parse_zone<R: Read + Seek>(zone: &mut IgFile<R>, zone_tuid: u64) -> Result<Zone> {
-    let ufrags = parse_ufrags(zone)?;
+    let ufrags = parse_ufrags(zone, zone_tuid)?;
     let ufrag_shader_tuids = read_shader_table(zone, SECT_UFRAG_SHADER_TABLE)?;
     let shrub_instances = parse_shrub_instances(zone, zone_tuid)?;
     let foliage_instances = parse_foliage_instances(zone, zone_tuid)?;
@@ -365,7 +366,7 @@ fn synthetic_instance_tuid(zone_tuid: u64, kind: u8, index: u32) -> u64 {
     tag | (zone_low & 0x00FF_FFFF_FFFF_FFFF) | (index as u64)
 }
 
-fn parse_ufrags<R: Read + Seek>(zone: &mut IgFile<R>) -> Result<Vec<UFrag>> {
+fn parse_ufrags<R: Read + Seek>(zone: &mut IgFile<R>, zone_tuid: u64) -> Result<Vec<UFrag>> {
     let Some(section) = zone.section(SECT_UFRAGS) else {
         return Ok(Vec::new());
     };
@@ -384,20 +385,61 @@ fn parse_ufrags<R: Read + Seek>(zone: &mut IgFile<R>) -> Result<Vec<UFrag>> {
     };
 
     let count = section.count as usize;
+
+    // Two UFrag record layouts share section 0x6200 (ReLunacy Zone.cs):
+    // R2 uses OldUFrag — bounding sphere at +0x60 in raw 1/256 units, real
+    // tuid at +0x00. R3 uses NewUFrag — bounding sphere at +0x30 ALREADY in
+    // world units, +0x60 holds packed denormal junk (~1e-39), and +0x00 is
+    // float data, not a tuid. Reading R3 with the old layout zeroes every
+    // chunk's position, piling all terrain on the origin as overlapping
+    // garbage (the "yellow blob" terrain bug). Detect once per section: if
+    // most records have a non-finite / denormal +0x60, the whole zone is the
+    // new layout. Per-zone (not per-record) so an R2 chunk that legitimately
+    // sits at the origin can't flip a single record onto the wrong layout.
+    let new_layout = {
+        let mut denorm = 0usize;
+        let sample = count.min(16);
+        for i in 0..sample {
+            let base = u64::from(section.offset) + (i as u64) * UFRAG_SIZE;
+            zone.stream.seek_to(base + 0x60)?;
+            let p = zone.stream.read_vec3()?;
+            if p.iter().all(|c| !c.is_normal() || c.abs() < 1e-4) {
+                denorm += 1;
+            }
+        }
+        sample > 0 && denorm * 2 > sample
+    };
+
     let mut ufrags = Vec::with_capacity(count);
     for i in 0..count {
         let base = u64::from(section.offset) + (i as u64) * UFRAG_SIZE;
-        zone.stream.seek_to(base + 0x00)?;
-        let tuid = zone.stream.read_u64()?;
 
-        zone.stream.seek_to(base + 0x60)?;
-        let position_raw = zone.stream.read_vec3()?;
-        let position = [
-            position_raw[0] * UFRAG_VERTEX_SCALE,
-            position_raw[1] * UFRAG_VERTEX_SCALE,
-            position_raw[2] * UFRAG_VERTEX_SCALE,
-        ];
-        let radius = zone.stream.read_f32()? * UFRAG_VERTEX_SCALE;
+        let (tuid, position, radius) = if new_layout {
+            zone.stream.seek_to(base + 0x30)?;
+            let p = zone.stream.read_vec3()?;
+            let r = zone.stream.read_f32()?;
+            // NewUFrag +0x00 is float data, not a real tuid; synthesize a
+            // stable unique id so cache filenames can't collide.
+            let synth = zone_tuid
+                .wrapping_mul(0x100000001B3)
+                ^ (0x8000_0000_0000_0000u64 | i as u64);
+            (synth, p, r)
+        } else {
+            zone.stream.seek_to(base + 0x00)?;
+            let tuid = zone.stream.read_u64()?;
+            zone.stream.seek_to(base + 0x60)?;
+            let position_raw = zone.stream.read_vec3()?;
+            let radius_raw = zone.stream.read_f32()?;
+            (
+                tuid,
+                [
+                    position_raw[0] * UFRAG_VERTEX_SCALE,
+                    position_raw[1] * UFRAG_VERTEX_SCALE,
+                    position_raw[2] * UFRAG_VERTEX_SCALE,
+                ],
+                radius_raw * UFRAG_VERTEX_SCALE,
+            )
+        };
 
         zone.stream.seek_to(base + 0x40)?;
         let index_offset = zone.stream.read_u32()?;
@@ -425,6 +467,7 @@ fn parse_ufrags<R: Read + Seek>(zone: &mut IgFile<R>) -> Result<Vec<UFrag>> {
             vertex_count,
             index_count,
             shader_index,
+            vertex_offset,
             positions,
             uvs,
             indices,

@@ -74,6 +74,19 @@ pub struct AnimationHeader {
 
     pub control_ptr: u32,
     pub frames_ptr: u32,
+
+    /// Header u32 at +0x0C (IT calls it `loadedTag` and ignores it). When
+    /// non-zero on R3 clips it is a POINTER to a frame remap table: one u16
+    /// per logical frame mapping logical index -> stored frame index, padded
+    /// to 16 bytes and placed immediately before `frames_ptr`. Clips using it
+    /// store FEWER frames than `num_frames` (the tail entries repeat the last
+    /// stored frame); indexing `frames_ptr + f * stride` directly runs past
+    /// the stored data into the next clip's control block, which is the
+    /// "R3 face rig scales explode to ±16" bug. RE'd from
+    /// `hyb_plagued_bomb_fall_c` (105 logical / 101 stored) and
+    /// `hyb_hose_react_lower_left` (30 / 28) on haven_town_defense; neither
+    /// IT nor ReLunacy honors this field.
+    pub frame_remap_ptr: u32,
 }
 
 impl AnimationHeader {
@@ -162,7 +175,7 @@ pub fn read_animation_header_at<R: Read + Seek>(
     let num_bones = ig.stream.read_u16()?;
     let num_frames = ig.stream.read_u16()?;
     let name_ptr = u64::from(ig.stream.read_u32()?);
-    let _loaded_tag = ig.stream.read_u32()?;
+    let frame_remap_ptr = ig.stream.read_u32()?;
     let _unk4 = ig.stream.read_f32()?;
     let linear_speed = ig.stream.read_f32()?;
     let frame_rate = ig.stream.read_f32()?;
@@ -196,6 +209,7 @@ pub fn read_animation_header_at<R: Read + Seek>(
         num_8bit_tracks,
         control_ptr,
         frames_ptr,
+        frame_remap_ptr,
     })
 }
 
@@ -299,6 +313,37 @@ pub fn read_animation_control<R: Read + Seek>(
         track8_base_values,
         blend_masks,
     })
+}
+
+/// The remap table is only trusted when its structural signature holds: it
+/// sits immediately before `frames_ptr` (within one 0x80 alignment block,
+/// since `frames_ptr` is 0x80-aligned and the table is padded up to it) and
+/// the mapped index stays inside the clip. Anything else (other games reusing
+/// the header slot, TOD's pair-frame-transformed headers) falls back to
+/// direct indexing.
+fn effective_frame_index<R: Read + Seek>(
+    ig: &mut IgFile<R>,
+    h: &AnimationHeader,
+    frame_index: u16,
+) -> Result<u16> {
+    if h.frame_remap_ptr == 0 || h.frames_ptr == 0 || frame_index >= h.num_frames {
+        return Ok(frame_index);
+    }
+    let table_bytes = u64::from(h.num_frames) * 2;
+    let Some(gap) = u64::from(h.frames_ptr).checked_sub(u64::from(h.frame_remap_ptr)) else {
+        return Ok(frame_index);
+    };
+    if gap < table_bytes || gap >= table_bytes + 0x80 {
+        return Ok(frame_index);
+    }
+    ig.stream
+        .seek_to(u64::from(h.frame_remap_ptr) + u64::from(frame_index) * 2)?;
+    let mapped = ig.stream.read_u16()?;
+    if mapped < h.num_frames {
+        Ok(mapped)
+    } else {
+        Ok(frame_index)
+    }
 }
 
 pub fn read_animation_frame<R: Read + Seek>(
@@ -1046,8 +1091,17 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
         seed_for_bone_kind(m.bone_index as usize, m.kind);
     }
 
+    // Frame-remap (R3-only): the header +0x0C table maps logical frame ->
+    // stored frame for clips that store fewer physical frames than num_frames.
+    // Gated by profile so R2/RFOM/TOD read frames 1:1 as before.
+    let frame_remap = profile.frame_remap_active();
     for f in 0..nf {
-        let (v16, v8) = read_animation_frame(ig, h, f as u16)?;
+        let src_frame = if frame_remap {
+            effective_frame_index(ig, h, f as u16)?
+        } else {
+            f as u16
+        };
+        let (v16, v8) = read_animation_frame(ig, h, src_frame)?;
 
         for (i, m) in ctrl.track16_masks.iter().enumerate() {
             let v = match v16.get(i) {
@@ -1126,8 +1180,35 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
     let additive = h.is_additive();
     let delta_ps = profile.delta_pos_scale_active(h.flags & 0x0200 != 0);
 
+    let rebase_pos = profile.unflagged_pos_rebase_active(h.flags & 0x0400 != 0)
+        && skel.is_some()
+        && !additive
+        && !delta_ps;
+    let mut pos_track_ref: Vec<[Option<i16>; 3]> = vec![[None; 3]; if rebase_pos { nb } else { 0 }];
+    if rebase_pos {
+        for (i, m) in ctrl.ref_pose_masks.iter().enumerate() {
+            if matches!(m.kind, TrackKind::Position) {
+                let b = m.bone_index as usize;
+                let c = m.component as usize;
+                if b < nb && c < 3 {
+                    pos_track_ref[b][c] = ctrl.ref_pose_values.get(i).copied();
+                }
+            }
+        }
+        for (i, m) in ctrl.track8_masks.iter().enumerate() {
+            if matches!(m.kind, TrackKind::Position) {
+                let b = m.bone_index as usize;
+                let c = m.component as usize;
+                if b < nb && c < 3 && pos_track_ref[b][c].is_none() {
+                    pos_track_ref[b][c] = ctrl.track8_base_values.get(i).copied();
+                }
+            }
+        }
+    }
+
     let mut bones = Vec::with_capacity(nb);
     let blend_gate = profile.blend_mask_rotation_gate_active();
+    let bind_fallback = profile.untracked_bind_fallback_active();
     for b in 0..nb {
 
         let blend_mask = ctrl.blend_masks.get(b).copied().unwrap_or(1);
@@ -1163,6 +1244,22 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 .map(|bl| extract_bind_rotation(&bl))
                 .unwrap_or([0.0, 0.0, 0.0, 1.0]);
             bind_q.to_vec()
+        } else if let Some(bl) = skel
+            .filter(|_| bind_fallback)
+            .and_then(|s| s.bind_local.get(b).copied())
+        {
+            // Untracked bones must rest at the SKELETON BIND, not the clip's
+            // ref pose. Shared animsets (R3 gameheads: one animset serves
+            // susan/female/male/capelli/child heads) carry ref rotations that
+            // diverge up to 180° from an individual head's bind on the
+            // teeth/tongue bones — the "teeth stick out of the face on any
+            // animation" bug. IT emits NO channel for untracked bones (node
+            // keeps bind rest); we emit an explicit bind channel so switching
+            // clips in the viewer still resets every bone. Position/scale
+            // fallbacks below already behave this way (bind or no channel).
+            // R3-only via profile; R2/RFOM keep the ref-pose fallback they
+            // were rendering correctly with.
+            extract_bind_rotation(&bl).to_vec()
         } else {
             let q = dequantize_quaternion(
                 ctrl.ref_pose_rotations.get(b).copied().unwrap_or([0, 0, 0, 32767]),
@@ -1184,6 +1281,13 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
         let pos_bias = |c: usize| if delta_ps { rt_fallback[c] } else { 0.0 };
         let scl_bias = |c: usize| if delta_ps { rs_fallback[c] } else { 0.0 };
 
+        let rebase_ref = |c: usize| -> Option<i16> {
+            if rebase_pos {
+                pos_track_ref[b][c]
+            } else {
+                None
+            }
+        };
         let translations = if pos_animated[b] {
             let mut out = Vec::with_capacity(nf * 3);
             for f in 0..nf {
@@ -1191,7 +1295,12 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
                 let mask = pos_set[b * nf + f];
                 for c in 0..3 {
                     if mask & (1 << c) != 0 {
-                        out.push(raw[c] as f32 * position_scale + pos_bias(c));
+                        match rebase_ref(c) {
+                            Some(r) => out.push(
+                                rt_fallback[c] + (raw[c] as f32 - r as f32) * position_scale,
+                            ),
+                            None => out.push(raw[c] as f32 * position_scale + pos_bias(c)),
+                        }
                     } else {
                         out.push(rt_fallback[c]);
                     }
@@ -1204,7 +1313,11 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
             let mut out = Vec::with_capacity(3);
             for c in 0..3 {
                 if mask & (1 << c) != 0 {
-                    out.push(raw[c] as f32 * position_scale + pos_bias(c));
+                    if rebase_ref(c).is_some() {
+                        out.push(rt_fallback[c]);
+                    } else {
+                        out.push(raw[c] as f32 * position_scale + pos_bias(c));
+                    }
                 } else {
                     out.push(rt_fallback[c]);
                 }

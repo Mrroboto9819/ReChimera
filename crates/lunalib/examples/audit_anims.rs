@@ -113,6 +113,21 @@ fn main() -> ExitCode {
         for m in &skel.bind_local {
             bind_mags.push((m[12] * m[12] + m[13] * m[13] + m[14] * m[14]).sqrt());
         }
+        let mut depth: Vec<u32> = vec![0; skel.bones.len()];
+        for i in 0..skel.bones.len() {
+            let mut d = 0u32;
+            let mut cur = i;
+            let mut hops = 0;
+            while let Some(p) = skel.bones[cur].parent() {
+                if p == cur || hops > skel.bones.len() {
+                    break;
+                }
+                d += 1;
+                cur = p;
+                hops += 1;
+            }
+            depth[i] = d;
+        }
         let typical_bind = {
             let mut v: Vec<f32> = bind_mags.iter().copied().filter(|m| *m > 1e-4).collect();
             v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -156,7 +171,8 @@ fn main() -> ExitCode {
             let mut nan = false;
             for (bi, bone) in clip.bones.iter().enumerate() {
                 let bind = bind_mags.get(bi).copied().unwrap_or(0.0).max(typical_bind);
-                if bone.translation_animated {
+                let root_motion_carrier = depth.get(bi).copied().unwrap_or(0) <= 1;
+                if bone.translation_animated && !root_motion_carrier {
                     for f in bone.translations.chunks_exact(3) {
                         let mag = (f[0] * f[0] + f[1] * f[1] + f[2] * f[2]).sqrt();
                         if !mag.is_finite() {

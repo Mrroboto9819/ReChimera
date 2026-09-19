@@ -3,5 +3,5 @@ mobys count=170 verts=583325 indices=2291988 skel_bones=3855 hash=1595778EBB655E
 ties count=404 verts=392782 hash=DC6F300D97BE0F52
 shaders count=1008 hash=87F8041F4F00E12C
 textures count=1857 rgba_bytes=2188297472 hash=D7008E4CAA5BC0BE
-zones count=13 tie_instances=5736 ufrags=212 hash=56AE235105240DA5
+zones count=13 tie_instances=5736 ufrags=212 hash=9051CC69C2F8F969
 gameplay regions=3 moby_instances=843 hash=45D9382250A80247

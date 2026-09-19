@@ -182,6 +182,16 @@ export const reextractLevelCache = (
   gameId?: string,
 ) => invoke<void>("reextract_level_cache", { folder, gameId, onEvent });
 
+export interface ClearedCache {
+  existed: boolean;
+  freed_bytes: number;
+}
+
+/** Delete the level's `_rechimera_cache` folder outright (no rebuild).
+ *  The next level open will run a fresh extraction. */
+export const clearLevelCache = (folder: string) =>
+  invoke<ClearedCache>("clear_level_cache", { folder });
+
 
 
 
@@ -791,6 +801,19 @@ export const listGltfsInFolder = (path: string) =>
 export const readFileBytes = (path: string) =>
   invoke<ArrayBuffer>("read_file_bytes", { path });
 
+export const detectGameIdForFolder = async (
+  folder: string,
+): Promise<string | null> => {
+  try {
+    const bytes = await readFileBytes(`${folder}/_rechimera_cache/game.json`);
+    const text = new TextDecoder().decode(new Uint8Array(bytes));
+    const m = text.match(/"game"\s*:\s*"([^"]+)"/);
+    return m ? m[1]! : null;
+  } catch {
+    return null;
+  }
+};
+
 
 
 
@@ -1291,6 +1314,17 @@ export function r2ExtractGlobals(
   ch.onmessage = onEvent;
   return invoke<void>("r2_extract_globals", { usrdir, onEvent: ch });
 }
+
+export interface ClearedGlobals {
+  removed: string[];
+  freed_bytes: number;
+}
+
+/** Delete the extracted `global_cached/` + `global_uncached/` folders so the
+ *  next globals step re-extracts from the source PSARCs. Refuses to delete a
+ *  variant whose source `.psarc` is missing (it could not be rebuilt). */
+export const r2ClearGlobals = (usrdir: string) =>
+  invoke<ClearedGlobals>("r2_clear_globals", { usrdir });
 
 /** Extract every `data/patch_NN.psarc` (DLC content) into the USRDIR. After
  *  this completes, DLC MP maps appear in `r2ListMaps()` output (e.g.

@@ -10,6 +10,8 @@ import { clone as skeletonAwareClone } from "three/examples/jsm/utils/SkeletonUt
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
+  decodeAnimsetClip,
+  detectGameIdForFolder,
   fetchAnimsetClip,
   findGlbTextures,
   listAnimsetClips,
@@ -346,6 +348,12 @@ export function GltfCharacterModal({
     return stem;
   }, [file]);
 
+  const assetTuidHex = useMemo(() => {
+    if (!file) return null;
+    const m = file.name.match(/(?:0x)?([0-9A-Fa-f]{16})/);
+    return m ? m[1]! : null;
+  }, [file]);
+
   // Filter level animsets by name relation to the character. Two
   // heuristics, in priority order:
   //   1. Exact substring match between clip name and stem (or vice versa)
@@ -415,12 +423,22 @@ export function GltfCharacterModal({
         // then, raw clips that include bone TRANSLATIONS may look off
         // in the preview. Bone ROTATIONS (which dominate idle/walk
         // anims) work fine.
-        const decoded: DecodedClip = await fetchAnimsetClip(
-          levelFolder,
-          clip.tuid_hex,
-          0, // bind_pose_inverse_offset — passing 0 means positionScale=1
-          0, // scale_shift — same
-        );
+        const gameId = await detectGameIdForFolder(levelFolder);
+        const decoded: DecodedClip =
+          assetTuidHex && gameId === "r3"
+            ? await decodeAnimsetClip(
+                levelFolder,
+                assetTuidHex,
+                clip.tuid_hex,
+                0,
+                gameId,
+              )
+            : await fetchAnimsetClip(
+                levelFolder,
+                clip.tuid_hex,
+                0, // bind_pose_inverse_offset — passing 0 means positionScale=1
+                0, // scale_shift — same
+              );
         const aclip = buildClipForGlbBones(decoded, sceneBones);
         // Diagnostics: log clip + scene-bone state when applying. If
         // tracks=0 the bone-name remap failed; if tracks > 0 but mesh
@@ -443,7 +461,7 @@ export function GltfCharacterModal({
         setLevelAnimsetsError(`Apply failed: ${e}`);
       }
     },
-    [levelFolder, sceneBones],
+    [levelFolder, sceneBones, assetTuidHex],
   );
 
   // Export the loaded scene + the currently-applied clip(s) as a .glb

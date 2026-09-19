@@ -373,6 +373,45 @@ pub fn r2_extract_globals(
     Ok(())
 }
 
+#[derive(Serialize)]
+pub struct ClearedGlobals {
+    pub removed: Vec<String>,
+    pub freed_bytes: u64,
+}
+
+#[tauri::command]
+pub fn r2_clear_globals(usrdir: String) -> Result<ClearedGlobals, String> {
+    if usrdir.trim().is_empty() {
+        return Err("empty USRDIR".to_string());
+    }
+    let packed_game = Path::new(&usrdir).join("packed").join("game");
+    if !packed_game.is_dir() {
+        return Err(format!("{packed_game:?} is not a directory"));
+    }
+    let mut removed = Vec::new();
+    let mut freed_bytes = 0u64;
+    for variant in ["global_cached", "global_uncached"] {
+        let out_dir = packed_game.join(variant);
+        if !out_dir.is_dir() {
+            continue;
+        }
+        if !packed_game.join(format!("{variant}.psarc")).is_file() {
+            return Err(format!(
+                "{variant}.psarc is missing — refusing to delete the extracted {variant}/ folder because it could not be rebuilt"
+            ));
+        }
+        freed_bytes += crate::cache::dir_size_bytes(&out_dir);
+        std::fs::remove_dir_all(&out_dir).map_err(|e| {
+            format!("delete {out_dir:?}: {e} — close any program using it and retry")
+        })?;
+        removed.push(variant.to_string());
+    }
+    Ok(ClearedGlobals {
+        removed,
+        freed_bytes,
+    })
+}
+
 /// Extract every `data/patch_NN.psarc` into the USRDIR root in-place.
 /// Internal paths reconstitute as a layered overlay:
 ///   - `built/patch/{assetlookup,mobys,textures,highmips,shaders,animsets,zones,lighting}.dat`

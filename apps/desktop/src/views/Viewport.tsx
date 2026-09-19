@@ -37,9 +37,9 @@ import type {
   UFragMesh,
 } from "../api";
 import {
+  decodeAnimsetClip,
   decodeMeshGeom,
   exportLevelGlb,
-  fetchAnimsetClip,
   readCachedBytes,
   type LevelGlbExportEvent,
 } from "../api";
@@ -1948,9 +1948,16 @@ function SkinnedSelectionOverlay({
     const targetHash = overrideAnimsetHash ?? asset.animset_hash;
     if (!targetHash) return;
     let cancelled = false;
-    const bpio = asset.bind_pose_inverse_offset ?? 0;
-    const ss = asset.skeleton?.scale_shift ?? 0;
-    fetchAnimsetClip(levelFolder, targetHash, bpio, ss)
+    // Use the skeleton+profile-aware decode. `fetch_animset_clip` decodes with
+    // NO skeleton and NO game profile — and R3 gameheads SHARE one animset
+    // across different head skeletons (female/child/capelli), so it cannot
+    // know which head's bind pose to use. That produced wrong bind fallbacks:
+    // teeth protruding and broken expressions in the live level view even
+    // though the exported GLB (which goes through decode_clips_for_moby with
+    // the profile) was correct. `decode_animset_clip` resolves THIS asset's
+    // own skeleton and the R3 AnimProfile (frame-remap + untracked-bind
+    // fallback). Clip index 0 preserves the previous "first clip" behavior.
+    decodeAnimsetClip(levelFolder, asset.asset_tuid, targetHash, 0)
       .then((c) => {
         if (!cancelled) setClip(c);
       })

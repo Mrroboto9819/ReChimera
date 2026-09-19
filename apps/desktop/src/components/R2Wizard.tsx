@@ -10,6 +10,7 @@ import {
   cacheStatus,
   extractLevelToCache,
   r2CacheNeedsRebuild,
+  r2ClearGlobals,
   r2ExtractGlobals,
   r2ExtractPatches,
   r2ExtractRootPsarcs,
@@ -480,6 +481,19 @@ export function R2Wizard({
       setExtractBusy(false);
     }
   }, [canProceedToGlobals, usrdir]);
+
+  const redoGlobals = useCallback(async () => {
+    if (!usrdir.trim()) return;
+    setStatusError(null);
+    try {
+      await r2ClearGlobals(usrdir.trim());
+    } catch (e) {
+      setStatusError(String(e));
+      return;
+    }
+    globalsForceRebuildRef.current = true;
+    await startGlobals();
+  }, [usrdir, startGlobals]);
 
   const continueToMaps = useCallback(async () => {
     setPhase("maps");
@@ -1483,6 +1497,14 @@ export function R2Wizard({
           <>
             <Button onClick={onClose}>Cancel</Button>
             <Button
+              variant="warn"
+              onClick={() => void redoGlobals()}
+              disabled={statusBusy || busy}
+              title="Delete the extracted global_cached/ + global_uncached/ folders and re-extract them from the source PSARCs"
+            >
+              Re-extract globals
+            </Button>
+            <Button
               variant="primary"
               onClick={() => void continueToMaps()}
               disabled={statusBusy || busy}
@@ -1495,6 +1517,16 @@ export function R2Wizard({
       return (
         <>
           <Button onClick={onClose}>Cancel</Button>
+          {status?.global_cached === "ready" && (
+            <Button
+              variant="warn"
+              onClick={() => void redoGlobals()}
+              disabled={statusBusy || busy}
+              title="Delete the extracted global_cached/ + global_uncached/ folders and re-extract them from the source PSARCs"
+            >
+              Re-extract globals
+            </Button>
+          )}
           <Button
             variant="primary"
             onClick={startGlobals}

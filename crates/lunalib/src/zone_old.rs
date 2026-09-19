@@ -362,6 +362,7 @@ fn read_ufrags<R: std::io::Read + std::io::Seek>(
             vertex_count,
             index_count,
             shader_index,
+            vertex_offset,
             positions,
             uvs,
             indices,

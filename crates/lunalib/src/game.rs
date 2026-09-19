@@ -53,16 +53,25 @@ impl Game {
                 game: Some(self),
                 apply_delta_pos_scale: true,
                 apply_blend_mask_rotation_gate: true,
+                apply_frame_remap: true,
+                untracked_rotation_bind_fallback: true,
+                rebase_unflagged_positions: true,
             },
             Self::R2 => AnimProfile {
                 game: Some(self),
                 apply_delta_pos_scale: true,
                 apply_blend_mask_rotation_gate: false,
+                apply_frame_remap: false,
+                untracked_rotation_bind_fallback: false,
+                rebase_unflagged_positions: false,
             },
             Self::Rfom | Self::Tod | Self::A4O | Self::ACiT | Self::FFA => AnimProfile {
                 game: Some(self),
                 apply_delta_pos_scale: false,
                 apply_blend_mask_rotation_gate: false,
+                apply_frame_remap: false,
+                untracked_rotation_bind_fallback: false,
+                rebase_unflagged_positions: false,
             },
         }
     }
@@ -86,6 +95,22 @@ pub struct AnimProfile {
     pub game: Option<Game>,
     pub apply_delta_pos_scale: bool,
     pub apply_blend_mask_rotation_gate: bool,
+    /// R3-only: honor the frame-remap table pointed to by header +0x0C
+    /// (logical frame -> stored frame). R2/RFOM/TOD clips do not use it and
+    /// were rendering correctly without it, so it stays off for them.
+    pub apply_frame_remap: bool,
+    /// R3-only: rest untracked-rotation bones at the SKELETON BIND instead of
+    /// the clip's ref pose. Needed because R3 gameheads share one animset whose
+    /// ref pose is up to 180° off each head's bind on teeth bones. R2 faces
+    /// were working with the ref-pose fallback, so it stays off for them.
+    pub untracked_rotation_bind_fallback: bool,
+    /// R3-only: clips WITHOUT header flag 0x0400 (old-generation encoding,
+    /// e.g. child_head) author positions against a ref pose that does not
+    /// match the target skeleton (child face_angry refs run ~1.4x the child
+    /// bind — adult-head proportions). Rebase tracked positions to
+    /// `bind + (decoded - clip_ref)` and ref-only positions to plain bind.
+    /// 0x0400 clips (all adult gameheads) keep absolute positions.
+    pub rebase_unflagged_positions: bool,
 }
 
 impl AnimProfile {
@@ -93,6 +118,9 @@ impl AnimProfile {
         game: None,
         apply_delta_pos_scale: true,
         apply_blend_mask_rotation_gate: true,
+        apply_frame_remap: true,
+        untracked_rotation_bind_fallback: true,
+        rebase_unflagged_positions: false,
     };
 
     pub fn delta_pos_scale_active(&self, header_flag_set: bool) -> bool {
@@ -110,6 +138,30 @@ impl AnimProfile {
             return false;
         }
         self.apply_blend_mask_rotation_gate
+    }
+
+    pub fn frame_remap_active(&self) -> bool {
+        if env::var("RECHIMERA_DISABLE_FRAME_REMAP").is_ok() {
+            return false;
+        }
+        self.apply_frame_remap
+    }
+
+    pub fn untracked_bind_fallback_active(&self) -> bool {
+        if env::var("RECHIMERA_DISABLE_BIND_FALLBACK").is_ok() {
+            return false;
+        }
+        self.untracked_rotation_bind_fallback
+    }
+
+    pub fn unflagged_pos_rebase_active(&self, header_has_0x0400: bool) -> bool {
+        if header_has_0x0400 {
+            return false;
+        }
+        if env::var("RECHIMERA_DISABLE_POS_REBASE").is_ok() {
+            return false;
+        }
+        self.rebase_unflagged_positions
     }
 
     pub fn matrix_convention(&self) -> MatrixConvention {

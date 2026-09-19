@@ -1636,6 +1636,14 @@ export function App() {
             setCacheModalInitialPanel("sky");
           }
         }}
+        onCacheCleared={(freedBytes) => {
+          setCacheState(null);
+          setCacheManifest(null);
+          log(
+            "ok",
+            `Cache deleted (${(freedBytes / (1024 * 1024)).toFixed(1)} MB freed). Reopen the level to re-extract.`,
+          );
+        }}
         onRequestExtract={() => {
           if (!summary) return;
           console.log("[cache-modal] user requested extract", summary.folder);

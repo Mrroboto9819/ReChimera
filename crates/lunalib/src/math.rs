@@ -30,11 +30,31 @@ pub fn decompose_row_major(m: &[f32; 16]) -> ([f32; 3], [f32; 3], [f32; 4]) {
         return (translation, scale, [0.0, 0.0, 0.0, 1.0]);
     }
 
-    let r = [
+    let mut r = [
         [rx[0] / sx, ry[0] / sy, rz[0] / sz],
         [rx[1] / sx, ry[1] / sy, rz[1] / sz],
         [rx[2] / sx, ry[2] / sy, rz[2] / sz],
     ];
+    let mut scale = scale;
+
+    // A mirrored instance (negative determinant) is a reflection, which a
+    // quaternion cannot represent. Shepperd's method below then emits a
+    // NON-UNIT quaternion; three.js applies that as rotation + a spurious
+    // scale of |q|^2, shrinking/distorting the object. ~24% of R3 ties are
+    // mirrored (e.g. corrugated-chunk / foundation-wall props). Fold the
+    // reflection into a negative X scale and flip column 0 so what remains is
+    // a proper rotation — three.js reconstructs the mirror from the signed
+    // scale. Matches three.js Matrix4.decompose. No-op for det>0 matrices, so
+    // correctly-decomposed instances (R2/RFOM included) are unchanged.
+    let det = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+        - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+        + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
+    if det < 0.0 {
+        scale[0] = -scale[0];
+        r[0][0] = -r[0][0];
+        r[1][0] = -r[1][0];
+        r[2][0] = -r[2][0];
+    }
 
     let trace = r[0][0] + r[1][1] + r[2][2];
     let quat = if trace > 0.0 {
@@ -328,5 +348,27 @@ mod tests {
         assert!(approx(q[1], 0.0));
         assert!(approx(q[2], 0.0));
         assert!(approx(q[3], 1.0));
+    }
+}
+
+#[cfg(test)]
+mod reflection_tests {
+    use super::*;
+    #[test]
+    fn reflected_matrix_yields_unit_quaternion() {
+        // identity rotation with X mirrored + nonuniform scale (row-major R*S)
+        let m = [
+            -0.66, 0.0, 0.0, 0.0,
+            0.0, 0.59, 0.0, 0.0,
+            0.0, 0.0, 0.92, 0.0,
+            10.0, 20.0, 30.0, 1.0,
+        ];
+        let (t, s, q) = decompose_row_major(&m);
+        assert_eq!(t, [10.0, 20.0, 30.0]);
+        let qn = (q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]).sqrt();
+        assert!((qn - 1.0).abs() < 1e-4, "quat must be unit, got |q|={qn}");
+        // one scale axis carries the mirror sign
+        let neg = [s[0] < 0.0, s[1] < 0.0, s[2] < 0.0].iter().filter(|b| **b).count();
+        assert_eq!(neg, 1, "exactly one axis negative, got scale={s:?}");
     }
 }

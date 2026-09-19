@@ -9,12 +9,14 @@ import {
   Maximize2,
   Minimize2,
   Search,
+  Trash2,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   bulkExtractSoundsZip,
   classifySound,
+  clearLevelCache,
   exportTextureDds,
   exportTexturePng,
   extractOneSound,
@@ -70,6 +72,10 @@ interface CacheLibraryModalProps {
    *  get the full layered view + animation scrubber rather than just a
    *  bigger canvas. */
   onOpenInWorkbench?: (assetTuidHex: string, kind: "moby" | "tie") => void;
+  /** Called after the `_rechimera_cache` folder was deleted from disk so
+   *  the parent can drop its cache-derived state (status chip, manifest).
+   *  Receives the number of bytes freed. */
+  onCacheCleared?: (freedBytes: number) => void;
 }
 
 export type LibraryFilter =
@@ -136,9 +142,15 @@ export function CacheLibraryModal({
   currentSkyboxTextureId,
   cubemapDescriptor: _cubemapDescriptor,
   onOpenInWorkbench,
+  onCacheCleared,
 }: CacheLibraryModalProps) {
   const [manifest, setManifest] = useState<CacheManifest | null>(null);
   const [manifestError, setManifestError] = useState<string | null>(null);
+  const [confirmClearCache, setConfirmClearCache] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
+  useEffect(() => {
+    if (!open) setConfirmClearCache(false);
+  }, [open]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("moby");
   const [selectedTuid, setSelectedTuid] = useState<string | null>(null);
@@ -1153,6 +1165,40 @@ export function CacheLibraryModal({
             <span className="dim small" style={{ marginRight: "auto" }}>
               {bulkStatus}
             </span>
+          )}
+          {folder && (
+            <Button
+              variant="warn"
+              icon={Trash2}
+              loading={clearingCache}
+              disabled={clearingCache}
+              onClick={() => {
+                if (!confirmClearCache) {
+                  setConfirmClearCache(true);
+                  return;
+                }
+                setClearingCache(true);
+                clearLevelCache(folder)
+                  .then((r) => {
+                    onCacheCleared?.(r.freed_bytes);
+                    onClose();
+                  })
+                  .catch((e) => {
+                    setManifestError(String(e));
+                  })
+                  .finally(() => {
+                    setClearingCache(false);
+                    setConfirmClearCache(false);
+                  });
+              }}
+              title="Delete this level's _rechimera_cache folder from disk. The next open runs a fresh extraction."
+            >
+              {clearingCache
+                ? "Deleting…"
+                : confirmClearCache
+                  ? "Really delete cache?"
+                  : "Delete cache"}
+            </Button>
           )}
           <Button onClick={onCloseGame ?? onClose}>
             {onCloseGame ? "Close game files" : "Close"}

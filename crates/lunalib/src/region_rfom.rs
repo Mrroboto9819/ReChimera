@@ -244,6 +244,7 @@ pub fn read_regions_rfom(level_folder: &Path) -> Result<Vec<Zone>> {
             vertex_count: num_verts,
             index_count: num_indices,
             shader_index: material_index,
+            vertex_offset,
             positions,
             uvs,
             indices,

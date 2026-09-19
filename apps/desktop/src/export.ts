@@ -3,7 +3,9 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
+  decodeAnimsetClip,
   decodeMeshGeom,
+  detectGameIdForFolder,
   fetchAnimsetClip,
   type AssetMeshes,
   type Instance,
@@ -147,6 +149,10 @@ export async function exportToGlb(
   const root = new THREE.Group();
   root.name = `ReChimera-export-${selectedInstances.length}`;
 
+  const detectedGameId = levelFolder
+    ? await detectGameIdForFolder(levelFolder)
+    : null;
+
   
   const neededAlbedos = new Set<number>();
   
@@ -200,12 +206,21 @@ export async function exportToGlb(
         const targetHash = overrideAnimsetHash ?? asset.animset_hash;
         if (targetHash && levelFolder) {
           try {
-            const decoded = await fetchAnimsetClip(
-              levelFolder,
-              targetHash,
-              asset.bind_pose_inverse_offset ?? 0,
-              asset.skeleton?.scale_shift ?? 0,
-            );
+            const decoded =
+              detectedGameId === "r3"
+                ? await decodeAnimsetClip(
+                    levelFolder,
+                    inst.asset_tuid,
+                    targetHash,
+                    0,
+                    detectedGameId,
+                  )
+                : await fetchAnimsetClip(
+                    levelFolder,
+                    targetHash,
+                    asset.bind_pose_inverse_offset ?? 0,
+                    asset.skeleton?.scale_shift ?? 0,
+                  );
             const aclip = buildAnimationClipFromDecoded(
               decoded,
               built.bones.length,
