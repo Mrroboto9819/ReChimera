@@ -102,3 +102,7 @@ _rechimera_cache/
 
 # Local game-data locations for integration fingerprinting — machine-specific
 test-levels.toml
+
+# Agent memory / instructions - never commit
+CLAUDE.md
+MEMORY.md
