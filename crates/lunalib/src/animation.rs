@@ -1180,10 +1180,7 @@ pub fn decode_animation_with_skel_bones<R: Read + Seek>(
     let additive = h.is_additive();
     let delta_ps = profile.delta_pos_scale_active(h.flags & 0x0200 != 0);
 
-    let rebase_pos = profile.unflagged_pos_rebase_active(h.flags & 0x0400 != 0)
-        && skel.is_some()
-        && !additive
-        && !delta_ps;
+    let rebase_pos = profile.pos_rebase_active() && skel.is_some() && !additive && !delta_ps;
     let mut pos_track_ref: Vec<[Option<i16>; 3]> = vec![[None; 3]; if rebase_pos { nb } else { 0 }];
     if rebase_pos {
         for (i, m) in ctrl.ref_pose_masks.iter().enumerate() {

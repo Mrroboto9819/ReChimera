@@ -104,12 +104,12 @@ pub struct AnimProfile {
     /// ref pose is up to 180° off each head's bind on teeth bones. R2 faces
     /// were working with the ref-pose fallback, so it stays off for them.
     pub untracked_rotation_bind_fallback: bool,
-    /// R3-only: clips WITHOUT header flag 0x0400 (old-generation encoding,
-    /// e.g. child_head) author positions against a ref pose that does not
-    /// match the target skeleton (child face_angry refs run ~1.4x the child
-    /// bind — adult-head proportions). Rebase tracked positions to
-    /// `bind + (decoded - clip_ref)` and ref-only positions to plain bind.
-    /// 0x0400 clips (all adult gameheads) keep absolute positions.
+    /// R3-only: animset clips author positions against a shared ref pose
+    /// that does not match the target skeleton (gamehead animsets serve many
+    /// heads: child face_angry refs run ~1.4x the child bind; adult heads
+    /// sit 2-3cm off — the teeth-through-lips distance). Rebase tracked
+    /// positions to `bind + (decoded - clip_ref)` and ref-only positions to
+    /// plain bind, for every clip regardless of header flags.
     pub rebase_unflagged_positions: bool,
 }
 
@@ -154,10 +154,7 @@ impl AnimProfile {
         self.untracked_rotation_bind_fallback
     }
 
-    pub fn unflagged_pos_rebase_active(&self, header_has_0x0400: bool) -> bool {
-        if header_has_0x0400 {
-            return false;
-        }
+    pub fn pos_rebase_active(&self) -> bool {
         if env::var("RECHIMERA_DISABLE_POS_REBASE").is_ok() {
             return false;
         }
