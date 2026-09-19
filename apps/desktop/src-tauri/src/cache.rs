@@ -1097,10 +1097,14 @@ fn dump_moby_shader_textures(
 /// (Rachel's `legacy/rachel_cinemares_face` -> `damon/rachel/rachael_
 /// cinematicres_head_*`; the blackops head's `artdepartment/character/
 /// blackops/*`). When a shader's albedo is provably absent from the encoded
-/// set after every recovery tier, substitute the moby's dominant resolved
-/// albedo (the shipped gamehead atlas, verified by hand-mapping it in
-/// Blender) instead of leaving the submesh magenta. R3-only at the call
-/// site; returns None when nothing needs patching.
+/// set after every recovery tier, replace its ABSENT channels (albedo,
+/// normal, expensive) with the full channel set of a resolved SIBLING
+/// shader from the same bangle, majority-voted across bangles — legacy
+/// face-variant meshes share bangles with the shipped face parts, so the
+/// sibling carries the correct atlas set (verified by hand-mapping in
+/// Blender). Raw palette dominance is only the last resort for shaders
+/// with no resolved sibling anywhere (it can pick hair over face).
+/// R3-only at the call site; returns None when nothing needs patching.
 fn substitute_absent_albedos(
     shaders: &HashMap<u64, lunalib::ShaderInfo>,
     asset: &lunalib::MobyAsset,
@@ -1121,18 +1125,71 @@ fn substitute_absent_albedos(
     if missing.is_empty() {
         return None;
     }
+    missing.sort_unstable();
+    missing.dedup();
+
+    let present = |id: Option<u32>| id.map_or(false, |v| texture_pngs.contains_key(&v));
+    let mut votes: HashMap<u64, HashMap<u64, usize>> = HashMap::new();
+    for bangle in &asset.bangles {
+        let mut broken_here: Vec<u64> = Vec::new();
+        let mut donors_here: Vec<u64> = Vec::new();
+        for m in &bangle.meshes {
+            let Some(&st) = asset.shader_tuids.get(m.shader_index as usize) else {
+                continue;
+            };
+            let Some(s) = shaders.get(&st) else { continue };
+            if present(s.albedo_tex_id) {
+                donors_here.push(st);
+            } else if s.albedo_tex_id.is_some() {
+                broken_here.push(st);
+            }
+        }
+        for b in &broken_here {
+            for d in &donors_here {
+                *votes.entry(*b).or_default().entry(*d).or_insert(0) += 1;
+            }
+        }
+    }
+
     let dominant = counts.iter().max_by_key(|(_, c)| **c).map(|(id, _)| *id)?;
     let mut patched = shaders.clone();
     for st in &missing {
+        let donor = votes
+            .get(st)
+            .and_then(|v| v.iter().max_by_key(|(_, c)| **c).map(|(d, _)| *d))
+            .and_then(|d| shaders.get(&d).copied());
         if let Some(s) = patched.get_mut(st) {
-            eprintln!(
-                "[tex-substitute] moby 0x{:016X} shader 0x{:016X}: albedo 0x{:08X} absent from every source — substituting dominant 0x{:08X}",
-                asset.tuid,
-                st,
-                s.albedo_tex_id.unwrap_or(0),
-                dominant
-            );
-            s.albedo_tex_id = Some(dominant);
+            match donor {
+                Some(d) => {
+                    eprintln!(
+                        "[tex-substitute] moby 0x{:016X} shader 0x{:016X}: absent channels replaced from same-bangle sibling (albedo 0x{:08X})",
+                        asset.tuid,
+                        st,
+                        d.albedo_tex_id.unwrap_or(0)
+                    );
+                    if present(d.albedo_tex_id) {
+                        s.albedo_tex_id = d.albedo_tex_id;
+                    } else {
+                        s.albedo_tex_id = Some(dominant);
+                    }
+                    if !present(s.normal_tex_id) && present(d.normal_tex_id) {
+                        s.normal_tex_id = d.normal_tex_id;
+                    }
+                    if !present(s.expensive_tex_id) && present(d.expensive_tex_id) {
+                        s.expensive_tex_id = d.expensive_tex_id;
+                    }
+                }
+                None => {
+                    eprintln!(
+                        "[tex-substitute] moby 0x{:016X} shader 0x{:016X}: albedo 0x{:08X} absent, no bangle sibling — substituting dominant 0x{:08X}",
+                        asset.tuid,
+                        st,
+                        s.albedo_tex_id.unwrap_or(0),
+                        dominant
+                    );
+                    s.albedo_tex_id = Some(dominant);
+                }
+            }
         }
     }
     Some(patched)
