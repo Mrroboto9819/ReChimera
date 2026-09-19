@@ -1093,6 +1093,51 @@ fn dump_moby_shader_textures(
     );
 }
 
+/// R3 mobys carry legacy shader slots whose textures never shipped in retail
+/// (Rachel's `legacy/rachel_cinemares_face` -> `damon/rachel/rachael_
+/// cinematicres_head_*`; the blackops head's `artdepartment/character/
+/// blackops/*`). When a shader's albedo is provably absent from the encoded
+/// set after every recovery tier, substitute the moby's dominant resolved
+/// albedo (the shipped gamehead atlas, verified by hand-mapping it in
+/// Blender) instead of leaving the submesh magenta. R3-only at the call
+/// site; returns None when nothing needs patching.
+fn substitute_absent_albedos(
+    shaders: &HashMap<u64, lunalib::ShaderInfo>,
+    asset: &lunalib::MobyAsset,
+    texture_pngs: &HashMap<u32, Vec<u8>>,
+) -> Option<HashMap<u64, lunalib::ShaderInfo>> {
+    let mut counts: HashMap<u32, usize> = HashMap::new();
+    let mut missing: Vec<u64> = Vec::new();
+    for &st in &asset.shader_tuids {
+        let Some(s) = shaders.get(&st) else { continue };
+        match s.albedo_tex_id {
+            Some(id) if texture_pngs.contains_key(&id) => {
+                *counts.entry(id).or_insert(0) += 1;
+            }
+            Some(_) => missing.push(st),
+            None => {}
+        }
+    }
+    if missing.is_empty() {
+        return None;
+    }
+    let dominant = counts.iter().max_by_key(|(_, c)| **c).map(|(id, _)| *id)?;
+    let mut patched = shaders.clone();
+    for st in &missing {
+        if let Some(s) = patched.get_mut(st) {
+            eprintln!(
+                "[tex-substitute] moby 0x{:016X} shader 0x{:016X}: albedo 0x{:08X} absent from every source — substituting dominant 0x{:08X}",
+                asset.tuid,
+                st,
+                s.albedo_tex_id.unwrap_or(0),
+                dominant
+            );
+            s.albedo_tex_id = Some(dominant);
+        }
+    }
+    Some(patched)
+}
+
 fn recover_game_from_sidecar(folder: &str) -> Option<Game> {
     let sidecar = cache_root(folder).join("game.json");
     let bytes = fs::read(&sidecar).ok()?;
@@ -2616,7 +2661,13 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
             let _ = on_event.send(CacheEvent::Progress { current: glb_done });
             continue;
         }
-        match lunalib::write_moby_glb_full(&asset, &clips, &shaders, &texture_pngs) {
+        let patched_shaders = if profile.game == Some(lunalib::Game::R3) {
+            substitute_absent_albedos(&shaders, &asset, &texture_pngs)
+        } else {
+            None
+        };
+        let shaders_for_glb = patched_shaders.as_ref().unwrap_or(&shaders);
+        match lunalib::write_moby_glb_full(&asset, &clips, shaders_for_glb, &texture_pngs) {
             Ok(glb_bytes) => {
                 if probe {
                     eprintln!(
