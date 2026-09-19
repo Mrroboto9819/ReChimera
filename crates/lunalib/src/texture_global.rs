@@ -65,7 +65,12 @@ pub fn find_global_tuid_roots(level_folder: &Path) -> Vec<PathBuf> {
     while let Some(p) = cur {
         // Check this directory's name first — if it IS `packed`, look down.
         if p.file_name().map(|n| n == "packed").unwrap_or(false) {
-            for variant in ["global_cached", "global_uncached"] {
+            for variant in [
+                "global_cached",
+                "global_cached2",
+                "global_uncached",
+                "global_uncached2",
+            ] {
                 let parent = p.join("game").join(variant);
                 let tuids = parent.join("built").join("tuids");
                 if tuids.is_dir() {

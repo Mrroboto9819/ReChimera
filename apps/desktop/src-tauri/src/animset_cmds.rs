@@ -266,8 +266,48 @@ pub fn decode_animset_clip(
     let ctrl =
         read_animation_control(&mut ig, &header).map_err(|e| format!("control: {e}"))?;
 
-    let clip = decode_animation_with_skel(&mut ig, &header, &ctrl, pos_scale, scale_scale, &skeleton, profile)
+    let mut clip = decode_animation_with_skel(&mut ig, &header, &ctrl, pos_scale, scale_scale, &skeleton, profile)
         .map_err(|e| format!("decode: {e}"))?;
+
+    if clip.additive && profile.game == Some(lunalib::Game::R3) {
+        let mut base_names: Vec<String> = Vec::new();
+        if let Some(n) = crate::cache::idle_base_for_overlay(&clip.name) {
+            base_names.push(n);
+        } else if let Some(n) = crate::cache::r3_base_for_overlay(&clip.name) {
+            base_names.push(n);
+        }
+        if !base_names.is_empty() {
+            base_names.push("mp_stand_idle".to_string());
+            base_names.push("mp_stand_dle".to_string());
+        }
+        'outer: for want in &base_names {
+            for off in &offsets {
+                let Ok(mut bh) = read_animation_header_at(&mut ig, *off) else {
+                    continue;
+                };
+                if &bh.name != want || bh.name == clip.name {
+                    continue;
+                }
+                if bh.is_additive() && skel_bone_count > 0 {
+                    bh.num_bones = skel_bone_count;
+                }
+                bh.apply_frame_stride_padding();
+                let Ok(bctrl) = read_animation_control(&mut ig, &bh) else {
+                    continue;
+                };
+                if let Ok(base) = decode_animation_with_skel(
+                    &mut ig, &bh, &bctrl, pos_scale, scale_scale, &skeleton, profile,
+                ) {
+                    let (rc, tc, sc) = clip.compose_with_base(&base, true);
+                    eprintln!(
+                        "[anim-compose] preview '{}' <- '{}' rot={rc} tra={tc} scl={sc}",
+                        clip.name, base.name
+                    );
+                    break 'outer;
+                }
+            }
+        }
+    }
 
     Ok(DecodedClipDto {
         name: clip.name,

@@ -577,7 +577,7 @@ pub(crate) fn decode_clips_for_moby_inline(
             }
         }
     }
-    compose_additive_overlays(&mut out, false);
+    compose_additive_overlays(&mut out, false, false);
     out
 }
 
@@ -737,7 +737,7 @@ pub(crate) fn decode_clips_for_moby(
             }
         }
     }
-    compose_additive_overlays(&mut out, debug_this);
+    compose_additive_overlays(&mut out, debug_this, profile.game == Some(lunalib::Game::R3));
     out
 }
 
@@ -746,7 +746,7 @@ pub(crate) fn decode_clips_for_moby(
 /// [[r2-fire-p-additive-overlay-standalone-limit]] — R2 weapon recoils are
 /// runtime-additive deltas, and without idle as the base the un-kicked bones
 /// snap to skeleton bind (T-shape arms holding no rifle).
-fn compose_additive_overlays(clips: &mut Vec<DecodedClip>, _debug: bool) {
+fn compose_additive_overlays(clips: &mut Vec<DecodedClip>, _debug: bool, r3: bool) {
     use std::collections::HashMap;
     let force_all = std::env::var("RECHIMERA_COMPOSE_FORCE")
         .map(|v| v.eq_ignore_ascii_case("all"))
@@ -762,7 +762,14 @@ fn compose_additive_overlays(clips: &mut Vec<DecodedClip>, _debug: bool) {
         .copied();
     let mut pairs: Vec<(usize, Option<usize>, String, &'static str)> = Vec::new();
     for (i, c) in clips.iter().enumerate() {
-        if let Some(base_name) = idle_base_for_overlay(&c.name) {
+        let base_name = idle_base_for_overlay(&c.name).or_else(|| {
+            if r3 && c.additive {
+                r3_base_for_overlay(&c.name)
+            } else {
+                None
+            }
+        });
+        if let Some(base_name) = base_name {
             if let Some(&base_idx) = name_to_idx.get(&base_name) {
                 if base_idx != i {
                     pairs.push((i, Some(base_idx), base_name, "weapon-idle"));
@@ -857,9 +864,24 @@ fn dump_fire_vs_idle_rotations(fire: &lunalib::DecodedClip, base: &lunalib::Deco
 ///   mp_carbine_fire_p       -> mp_carbine_idle_p
 ///   mp_carbine_alt_fire_p   -> mp_carbine_idle_p
 ///   mp_minigun_fire_cycle_p -> mp_minigun_idle_p
-fn idle_base_for_overlay(name: &str) -> Option<String> {
+pub(crate) fn idle_base_for_overlay(name: &str) -> Option<String> {
     for suffix in ["_alt_fire_p", "_fire_cycle_p", "_fire_p"] {
         if let Some(stem) = name.strip_suffix(suffix) {
+            return Some(format!("{stem}_idle_p"));
+        }
+    }
+    None
+}
+
+pub(crate) fn r3_base_for_overlay(name: &str) -> Option<String> {
+    if name == "visemes" || name == "head_visemes" {
+        return Some("head_idle".to_string());
+    }
+    if name.starts_with("exp_") && (name.ends_with("_lower") || name.ends_with("_upper")) {
+        return Some("head_idle".to_string());
+    }
+    if !name.ends_with("_idle_p") {
+        if let Some(stem) = name.strip_suffix("_p") {
             return Some(format!("{stem}_idle_p"));
         }
     }
