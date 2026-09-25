@@ -38,6 +38,7 @@ pub mod engine;
 pub mod moby;
 pub mod moby_old;
 pub mod moby_rfom;
+pub mod foliage;
 pub mod shader;
 pub mod shader_old;
 pub mod shader_rfom;
@@ -127,7 +128,7 @@ pub use shader::{read_shaders, ShaderInfo};
 pub use skeleton::{read_skeleton, read_skeleton_at, Bone, Skeleton};
 pub use sound::{
     bank_pair_for, decode_adpcm_block, decode_adpcm_stream, dump_sound_bank_info,
-    extract_bank_sounds, extract_bank_sounds_for_file, extract_raw_streaming, extract_stream_sounds, list_raw_streaming,
+    extract_bank_sounds, extract_bank_sounds_for_file, extract_raw_streaming, extract_stream_sounds, find_global_sound_bank_dirs, list_raw_streaming,
     list_sounds, reset_scream_diag, scan_raw_audio_offsets, streaming_sibling_for, write_wav_pcm16,
     write_wav_pcm16_mono, ExtractedSound, SoundKind, SoundSummary,
 };
@@ -136,6 +137,7 @@ pub use texture::{
     bulk_extract_pngs, decode_image_file_to_png, downsample_png_to, downsample_rgba, encode_png,
     read_textures, read_textures_streaming, read_textures_with_total, TexFormat, Texture,
 };
+pub use foliage::read_foliage_v2;
 pub use tie::{
     read_tie_assets, read_tie_assets_streaming, read_tie_assets_with_total, TieAsset, TieMeshGeom,
 };

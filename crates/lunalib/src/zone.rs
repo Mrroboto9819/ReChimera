@@ -128,26 +128,46 @@ where
     let mut zones_file = File::open(&zones_dat_path)?;
 
     for ptr in zone_ptrs {
-        if ptr.length > crate::MAX_ASSET_SIZE {
-            return Err(Error::AllocLimitExceeded {
-                size: u64::from(ptr.length),
-                limit: u64::from(crate::MAX_ASSET_SIZE),
-            });
+        // A single truncated or malformed zone chunk must not abort the
+        // whole phase: 54 good zones of terrain used to vanish because one
+        // zone's read_exact hit EOF ("failed to fill whole buffer").
+        let parsed = (|| -> Result<Zone> {
+            if ptr.length > crate::MAX_ASSET_SIZE {
+                return Err(Error::AllocLimitExceeded {
+                    size: u64::from(ptr.length),
+                    limit: u64::from(crate::MAX_ASSET_SIZE),
+                });
+            }
+            zones_file.seek(SeekFrom::Start(u64::from(ptr.offset)))?;
+            let mut buf = vec![0u8; ptr.length as usize];
+            zones_file.read_exact(&mut buf)?;
+            let mut zone_ig = IgFile::open(Cursor::new(buf))?;
+            parse_zone(&mut zone_ig, ptr.tuid)
+        })();
+        match parsed {
+            Ok(z) => on_each(z),
+            Err(e) => {
+                eprintln!(
+                    "warn: zone 0x{:016X} (len 0x{:X}) parse failed ({e}); skipping this zone",
+                    ptr.tuid, ptr.length
+                );
+            }
         }
-        zones_file.seek(SeekFrom::Start(u64::from(ptr.offset)))?;
-        let mut buf = vec![0u8; ptr.length as usize];
-        zones_file.read_exact(&mut buf)?;
-        let mut zone_ig = IgFile::open(Cursor::new(buf))?;
-        on_each(parse_zone(&mut zone_ig, ptr.tuid)?);
     }
     Ok(())
 }
 
 fn parse_zone<R: Read + Seek>(zone: &mut IgFile<R>, zone_tuid: u64) -> Result<Zone> {
-    let ufrags = parse_ufrags(zone, zone_tuid)?;
-    let ufrag_shader_tuids = read_shader_table(zone, SECT_UFRAG_SHADER_TABLE)?;
-    let shrub_instances = parse_shrub_instances(zone, zone_tuid)?;
-    let foliage_instances = parse_foliage_instances(zone, zone_tuid)?;
+    let warn_phase = |phase: &str, e: &Error| {
+        eprintln!("warn: zone 0x{zone_tuid:016X}: {phase} parse failed: {e}");
+    };
+    let ufrags = parse_ufrags(zone, zone_tuid).inspect_err(|e| warn_phase("ufrag", e))?;
+    let ufrag_shader_tuids = read_shader_table(zone, SECT_UFRAG_SHADER_TABLE)
+        .inspect_err(|e| warn_phase("ufrag-shader-table", e))?;
+    let shrub_instances =
+        parse_shrub_instances(zone, zone_tuid).inspect_err(|e| warn_phase("shrub", e))?;
+    let foliage_instances =
+        parse_foliage_instances(zone, zone_tuid).inspect_err(|e| warn_phase("foliage", e))?;
 
     let inst_section = match zone.section(SECT_TIE_INSTANCES) {
         Some(s) => s,
@@ -326,18 +346,70 @@ fn parse_foliage_instances<R: Read + Seek>(
         return Ok(Vec::new());
     }
 
-    let mut out = Vec::with_capacity(count);
+    // Section 0x7440 carries its record stride in the section header's
+    // entry-length field, and two layouts exist. 0xB0 is IT's R2-era
+    // FoliageV2Instance (foliageIndex at +0x94). 0x80 is the R3 layout,
+    // absent from both IT and ReLunacy, RE'd from mine_town_approach zone
+    // 0x16A917EFD041C6B1: 4x4 matrix at +0x00, bounding sphere at +0x40
+    // (radius +0x4C), per-plant uniform scale at +0x50 (the matrix rows
+    // bake its reciprocal — decomposed scale must be overridden or every
+    // plant renders inversely sized), lookup index at +0x70, constant -1
+    // at +0x78. Reading R3 records with the 0xB0 stride made +0x94 float
+    // payload masquerade as huge indices and aborted the whole zone.
+    let stride = match u64::from(inst_section.length) {
+        0xB0 => FOLIAGE_INSTANCE_SIZE,
+        0x80 => 0x80,
+        0 => FOLIAGE_INSTANCE_SIZE,
+        other => {
+            eprintln!(
+                "warn: zone 0x{zone_tuid:016X}: unknown foliage record stride 0x{other:X} \
+                 ({count} records); skipping foliage for this zone"
+            );
+            return Ok(Vec::new());
+        }
+    };
+    let r3_layout = stride == 0x80;
+    let index_offset = if r3_layout { 0x70 } else { 0x94 };
+
+    let table_entries =
+        u64::from(tuid_section.count).max(u64::from(tuid_section.length) / 8);
+    let mut indices = Vec::with_capacity(count);
     for i in 0..count {
-        let base = u64::from(inst_section.offset) + (i as u64) * FOLIAGE_INSTANCE_SIZE;
+        let base = u64::from(inst_section.offset) + (i as u64) * stride;
+        zone.stream.seek_to(base + index_offset)?;
+        indices.push(zone.stream.read_u32()?);
+    }
+    let in_range = indices
+        .iter()
+        .filter(|&&ix| u64::from(ix) < table_entries)
+        .count();
+    if in_range * 2 < count {
+        eprintln!(
+            "warn: zone 0x{zone_tuid:016X}: foliage records (stride 0x{stride:X}) don't index \
+             the 0x7400 table ({in_range}/{count} in range); skipping foliage for this zone"
+        );
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::with_capacity(count);
+    for (i, &foliage_index) in indices.iter().enumerate() {
+        if u64::from(foliage_index) >= table_entries {
+            continue;
+        }
+        let base = u64::from(inst_section.offset) + (i as u64) * stride;
         zone.stream.seek_to(base)?;
         let mut matrix = [0f32; 16];
         for slot in matrix.iter_mut() {
             *slot = zone.stream.read_f32()?;
         }
-        let (pos, scl, quat) = decompose_row_major(&matrix);
-
-        zone.stream.seek_to(base + 0x94)?;
-        let foliage_index = zone.stream.read_u32()?;
+        let (pos, mut scl, quat) = decompose_row_major(&matrix);
+        let mut bounding_radius = 0.0f32;
+        if r3_layout {
+            zone.stream.seek_to(base + 0x4C)?;
+            bounding_radius = zone.stream.read_f32()?;
+            let s = zone.stream.read_vec3()?;
+            scl = [s[0], s[1], s[2]];
+        }
 
         let byte_offset = u64::from(foliage_index)
             .checked_mul(8)
@@ -354,7 +426,7 @@ fn parse_foliage_instances<R: Read + Seek>(
             position: pos,
             quaternion: quat,
             scale: scl,
-            bounding_radius: 0.0,
+            bounding_radius,
         });
     }
     Ok(out)

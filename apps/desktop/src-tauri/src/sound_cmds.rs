@@ -37,8 +37,11 @@ pub(crate) fn list_level_sounds(level_folder: String) -> Result<Vec<SoundEntryDt
         if !lower.ends_with(".dat") || lower.contains("stream") {
             continue;
         }
-        let is_bank = lower == "resident_sound.dat"
-            || lower == "ps3sound.dat"
+        // Prefix matches (not exact names) so R3's language-infixed
+        // `resident_sound.us.dat` banks are recognized alongside the
+        // R2/RFOM-era exact `resident_sound.dat`.
+        let is_bank = lower.starts_with("resident_sound")
+            || lower.starts_with("ps3sound")
             || lower.starts_with("resident_dialogue")
             || lower.starts_with("ps3dialogue");
         if is_bank {
@@ -46,6 +49,28 @@ pub(crate) fn list_level_sounds(level_folder: String) -> Result<Vec<SoundEntryDt
         }
     }
     candidates.sort();
+
+    // R3 keeps no banks in the level folder at all — they live in the
+    // extracted `packed/game/global_sound_<lang>/built/sound/bank/<hash>/`
+    // trees. Emit those with ABSOLUTE paths as `source`: every extract
+    // command resolves sources via `folder.join(source)`, and joining an
+    // absolute path yields it unchanged, so the same commands work for
+    // both per-level and global banks.
+    for bank_dir in lunalib::find_global_sound_bank_dirs(folder) {
+        let Ok(rd) = std::fs::read_dir(&bank_dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let lower = name.to_ascii_lowercase();
+            if !lower.ends_with(".dat") || lower.contains("stream") {
+                continue;
+            }
+            if lower.starts_with("resident_sound") || lower.starts_with("resident_dialogue") {
+                candidates.push(bank_dir.join(&name).to_string_lossy().into_owned());
+            }
+        }
+    }
 
     let mut out: Vec<SoundEntryDto> = Vec::new();
     for filename in &candidates {
@@ -163,8 +188,8 @@ fn list_sound_banks_in(folder: &Path) -> std::io::Result<Vec<String>> {
         if lower.contains("stream") {
             continue;
         }
-        let is_bank = lower == "resident_sound.dat"
-            || lower == "ps3sound.dat"
+        let is_bank = lower.starts_with("resident_sound")
+            || lower.starts_with("ps3sound")
             || lower.starts_with("resident_dialogue")
             || (lower.starts_with("ps3dialogue") && !lower.starts_with("ps3dialoguestream"));
         if is_bank {
@@ -172,6 +197,24 @@ fn list_sound_banks_in(folder: &Path) -> std::io::Result<Vec<String>> {
         }
     }
     out.sort();
+    // R3: banks live under packed/game/global_sound_<lang>/built/sound/
+    // bank/<hash>/, not in the level folder. Absolute-path entries resolve
+    // unchanged through every `folder.join(source)` call site.
+    for bank_dir in lunalib::find_global_sound_bank_dirs(folder) {
+        let Ok(rd) = std::fs::read_dir(&bank_dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let n = entry.file_name().to_string_lossy().into_owned();
+            let lower = n.to_ascii_lowercase();
+            if !lower.ends_with(".dat") || lower.contains("stream") {
+                continue;
+            }
+            if lower.starts_with("resident_sound") || lower.starts_with("resident_dialogue") {
+                out.push(bank_dir.join(&n).to_string_lossy().into_owned());
+            }
+        }
+    }
     Ok(out)
 }
 

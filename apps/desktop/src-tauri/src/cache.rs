@@ -2015,6 +2015,70 @@ fn run_extract(folder: &str, game: Option<Game>, on_event: &Channel<CacheEvent>)
     )
     .map_err(|e| e.to_string())?;
     eprintln!("[cache] V2 tie reader done — {} ties", tie_done);
+
+    match lunalib::read_foliage_v2(level_path) {
+        Ok(foliage_assets) => {
+            let _ = fs::create_dir_all(root.join("foliage"));
+            let mut foliage_done = 0usize;
+            for asset in foliage_assets {
+                tie_assets_for_glb.push(asset.clone());
+                let submeshes: Vec<_> = asset
+                    .meshes
+                    .into_iter()
+                    .map(|m| {
+                        let (albedo, normal, emissive) = resolve_shader_textures(
+                            &shaders,
+                            &asset.shader_tuids,
+                            m.shader_index as usize,
+                        );
+                        if let Some(id) = albedo { needed_albedos.insert(id); }
+                        if let Some(id) = normal { needed_normals.insert(id); }
+                        if let Some(id) = emissive { needed_emissives.insert(id); }
+                        mesh_dto(
+                            m.positions,
+                            m.uvs,
+                            m.indices,
+                            albedo,
+                            normal,
+                            emissive,
+                            Vec::new(),
+                            Vec::new(),
+                        )
+                    })
+                    .collect();
+                let dto = AssetMeshesDto {
+                    asset_tuid: format!("0x{:016X}", asset.tuid),
+                    name: format!("foliage_{:016X}", asset.tuid),
+                    submeshes,
+                    skeleton: None,
+                    animset_hash: None,
+                    bind_pose_inverse_offset: 0,
+                    embedded_animation_count: 0,
+                };
+                let file_rel = format!("foliage/0x{:016X}.json", asset.tuid);
+                let path = root.join(&file_rel);
+                if let Ok(size_bytes) = write_json(&path, &dto) {
+                    entries.push(CacheManifestEntry {
+                        kind: "foliage".into(),
+                        tuid: dto.asset_tuid.clone(),
+                        name: dto.name.clone(),
+                        file: file_rel.clone(),
+                        size_bytes,
+                    });
+                }
+                foliage_done += 1;
+                let _ = on_event.send(CacheEvent::Item {
+                    kind: "tie",
+                    name: dto.name,
+                    file: file_rel,
+                });
+            }
+            if foliage_done > 0 {
+                eprintln!("[cache] V2 layout: extracted {foliage_done} foliage meshes");
+            }
+        }
+        Err(e) => eprintln!("warn: V2 foliage read failed: {e}"),
+    }
     }
 
     eprintln!("[cache] -> phase ufrags");

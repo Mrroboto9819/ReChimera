@@ -1150,39 +1150,95 @@ pub fn extract_raw_streaming(
 }
 
 
+// Both mappers accept either a bare filename or a path (the final
+// component is mapped, the directory part is preserved) and both accept
+// R3's language-infixed names: `resident_sound.us.dat` pairs with
+// `streaming_sound.us.dat` inside `packed/game/global_sound_<lang>/
+// built/sound/bank/<hash>/` — R3 ships no per-level banks at all.
+fn split_dir_and_name(path: &str) -> (&str, &str) {
+    match path.rfind(['/', '\\']) {
+        Some(i) => (&path[..=i], &path[i + 1..]),
+        None => ("", path),
+    }
+}
+
 pub fn bank_pair_for(stream_filename: &str) -> Option<String> {
-    let lower = stream_filename.to_lowercase();
-    if lower == "streaming_sound.dat" {
-        return Some("resident_sound.dat".to_string());
-    }
-    if let Some(rest) = lower.strip_prefix("streaming_dialogue") {
-        return Some(format!("resident_dialogue{rest}"));
-    }
-    if lower == "ps3soundstream.dat" {
-        return Some("ps3sound.dat".to_string());
-    }
-    if let Some(rest) = lower.strip_prefix("ps3dialoguestream") {
-        return Some(format!("ps3dialogue{rest}"));
-    }
-    None
+    let (dir, name) = split_dir_and_name(stream_filename);
+    let lower = name.to_lowercase();
+    let mapped = if let Some(rest) = lower.strip_prefix("streaming_sound") {
+        format!("resident_sound{rest}")
+    } else if let Some(rest) = lower.strip_prefix("streaming_dialogue") {
+        format!("resident_dialogue{rest}")
+    } else if lower == "ps3soundstream.dat" {
+        "ps3sound.dat".to_string()
+    } else if let Some(rest) = lower.strip_prefix("ps3dialoguestream") {
+        format!("ps3dialogue{rest}")
+    } else {
+        return None;
+    };
+    Some(format!("{dir}{mapped}"))
 }
 
 
 pub fn streaming_sibling_for(filename: &str) -> Option<String> {
-    if filename == "resident_sound.dat" {
-        return Some("streaming_sound.dat".to_string());
-    }
-    if let Some(rest) = filename.strip_prefix("resident_dialogue") {
+    let (dir, name) = split_dir_and_name(filename);
+    let mapped = if let Some(rest) = name.strip_prefix("resident_sound") {
+        format!("streaming_sound{rest}")
+    } else if let Some(rest) = name.strip_prefix("resident_dialogue") {
+        format!("streaming_dialogue{rest}")
+    } else if name == "ps3sound.dat" {
+        "ps3soundstream.dat".to_string()
+    } else if let Some(rest) = name.strip_prefix("ps3dialogue") {
+        format!("ps3dialoguestream{rest}")
+    } else {
+        return None;
+    };
+    Some(format!("{dir}{mapped}"))
+}
 
-        return Some(format!("streaming_dialogue{rest}"));
+/// Walk up from a level folder to the `packed/` ancestor and collect every
+/// extracted `game/*/built/sound/bank/<hash>/` directory. R3 keeps ALL its
+/// sound banks at game scope (the per-level `resident_sound.dat`
+/// convention is R2/RFOM-era), split across TWO archive families:
+/// `global_sound_<lang>.psarc` → language-infixed dialogue/VO bank+stream
+/// pairs, and `global_uncached.psarc` → language-free `resident_sound.dat`
+/// SFX/music/weapon banks (2,754 in R3 US, self-contained, no streaming
+/// sibling). Probe every extracted variant dir rather than a name prefix
+/// so both families — and any future ones — are found. Empty vec when
+/// nothing is extracted.
+pub fn find_global_sound_bank_dirs(level_folder: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut cur = Some(level_folder);
+    while let Some(p) = cur {
+        if p.file_name().map(|n| n == "packed").unwrap_or(false) {
+            let game = p.join("game");
+            if let Ok(rd) = std::fs::read_dir(&game) {
+                let mut variants: Vec<std::path::PathBuf> = rd
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|v| v.is_dir())
+                    .collect();
+                variants.sort();
+                for v in variants {
+                    let bank_root = v.join("built").join("sound").join("bank");
+                    if let Ok(banks) = std::fs::read_dir(&bank_root) {
+                        let mut dirs: Vec<std::path::PathBuf> = banks
+                            .flatten()
+                            .map(|e| e.path())
+                            .filter(|d| d.is_dir())
+                            .collect();
+                        dirs.sort();
+                        out.extend(dirs);
+                    }
+                }
+            }
+            if !out.is_empty() {
+                return out;
+            }
+        }
+        cur = p.parent();
     }
-    if filename == "ps3sound.dat" {
-        return Some("ps3soundstream.dat".to_string());
-    }
-    if let Some(rest) = filename.strip_prefix("ps3dialogue") {
-        return Some(format!("ps3dialoguestream{rest}"));
-    }
-    None
+    out
 }
 
 
