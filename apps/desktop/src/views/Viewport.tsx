@@ -1406,12 +1406,22 @@ function EditGizmo({
 }) {
   const helperRef = useRef<THREE.Group>(null);
   const transformRef = useRef<unknown>(null);
+  const badgeScaleRef = useRef<HTMLDivElement>(null);
   const { controls } = useThree();
 
   const inst = useMemo(
     () => (primary ? instances.find((i) => i.tuid === primary) ?? null : null),
     [primary, instances],
   );
+
+  useFrame(({ camera }) => {
+    const helper = helperRef.current;
+    const el = badgeScaleRef.current;
+    if (!helper || !el) return;
+    const d = camera.position.distanceTo(helper.position);
+    const s = Math.min(1.25, Math.max(0.45, 14 / Math.max(d, 0.001)));
+    el.style.transform = `scale(${s})`;
+  });
 
   
   
@@ -1437,21 +1447,21 @@ function EditGizmo({
       <group ref={helperRef}>
         <Html
           center
-          distanceFactor={20}
-          
           style={{ pointerEvents: "none" }}
           position={[0, 1.2, 0]}
         >
-          <div className="scene-badge">
-            <span className={`scene-badge-icon kind-${inst.kind}`}>
-              {inst.kind[0]?.toUpperCase()}
-            </span>
-            <span className="scene-badge-name">
-              {inst.name || inst.tuid.split("#")[0]}
-            </span>
-            {edits.isModified(inst.tuid) && (
-              <span className="scene-badge-mod">●</span>
-            )}
+          <div ref={badgeScaleRef} style={{ transformOrigin: "center" }}>
+            <div className="scene-badge">
+              <span className={`scene-badge-icon kind-${inst.kind}`}>
+                {inst.kind[0]?.toUpperCase()}
+              </span>
+              <span className="scene-badge-name">
+                {inst.name || inst.tuid.split("#")[0]}
+              </span>
+              {edits.isModified(inst.tuid) && (
+                <span className="scene-badge-mod">●</span>
+              )}
+            </div>
           </div>
         </Html>
       </group>

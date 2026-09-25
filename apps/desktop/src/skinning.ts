@@ -136,7 +136,12 @@ export function buildSkinnedAsset(
       geom.setAttribute("skinWeight", new THREE.BufferAttribute(skinW, 4));
 
       const skinnedMesh = new THREE.SkinnedMesh(geom, mat);
-      skinnedMesh.bind(skeleton);
+      // bind() without an explicit bindMatrix calls skeleton.calculateInverses(),
+      // which overwrites the file-provided boneInverses with inverses of the
+      // bones' not-yet-updated (identity) matrixWorlds — every bind offset then
+      // applies twice and skinned overlays deform (grim-pod "splay" bug).
+      // Passing the identity bindMatrix preserves bind_world_inverse.
+      skinnedMesh.bind(skeleton, new THREE.Matrix4());
       root.add(skinnedMesh);
       skinnedMeshes.push(skinnedMesh);
     } else {
